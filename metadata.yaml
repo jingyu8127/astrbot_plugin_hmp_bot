@@ -1,0 +1,9 @@
+name: astrbot_plugin_hmp_bot
+author: jingyu8127
+desc: HaulMP 平台查询插件 —— 绑定 HaulMP 论坛账号并查询玩家资料（用户名、显示名、在线状态、历史里程、所属车队等）。
+version: 1.0.0
+repo: https://github.com/jingyu8127/astrbot_plugin_hmp_bot
+display_name: HMP Bot
+short_desc: HaulMP 玩家资料查询与账号绑定
+# 声明兼容的 AstrBot 版本范围（可选，PEP 440 格式，不要加 v 前缀）
+# astrbot_version: ">=4.16,<5"
