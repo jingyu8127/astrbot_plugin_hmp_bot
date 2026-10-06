@@ -89,6 +89,7 @@ RE_SERVER = re.compile(r"^(?:/)?服务器\s*$")
 RE_LOCATE = re.compile(r"^(?:/)?定位\s*(.*)$")
 RE_TRAFFIC = re.compile(r"^(?:/)?路况\s*$")
 RE_SEARCH = re.compile(r"^(?:/)?搜人\s*(.*)$")
+RE_MENU = re.compile(r"^(?:/)?菜单\s*$")
 
 # ---------- 实时地图投影（复刻 map 源码 src/projection.js 的球面 LCC） ----------
 LIVE_URL = "https://map.haulmp.com/api/live"
@@ -581,7 +582,7 @@ class HmpBotPlugin(Star):
                 handle = lst[0]["handle"]  # 已绑定：直接定位主账号
             else:
                 return (
-                    "你还没有绑定永魂(HaulMP)账号。\n"
+                    "你还没有绑定(HaulMP)账号。\n"
                     "未绑定时请这样定位：定位 [用户名]\n"
                     "或先绑定：绑定 [用户名]"
                 )
@@ -766,6 +767,74 @@ class HmpBotPlugin(Star):
             else:
                 yield event.chain_result(res)
             return
+
+        m = RE_MENU.match(text)
+        if m:
+            yield event.plain_result(self._menu_text())
+            return
+
+    # ---------- 菜单 ----------
+    @staticmethod
+    def _menu_text() -> str:
+        return (
+            "🚛 HMP Bot 指令菜单\n\n"
+            "可用命令：\n"
+            "1. 绑定 [用户名] —— 绑定 HaulMP 论坛账号（最多 3 个，首个为主账号）\n"
+            "2. 我的绑定 —— 查看已绑定账号\n"
+            "3. 解绑 [序号/用户名/全部] —— 解绑账号\n"
+            "4. 查询 [用户名] —— 查询玩家资料（分组展示全部字段）\n"
+            "5. 搜人 [关键字] [筛选条件] —— 按用户名/显示名检索用户\n"
+            "6. 服务器 —— 查询服务器状态（在线人数/客户端版本）\n"
+            "7. 定位 [用户名] —— 查询玩家实时位置（地图图片）\n"
+            "8. 路况 —— 全量在线玩家路况（地图图片）\n\n"
+            "提示：所有命令兼容带 / 或不带 / 的写法；绑定后查询/定位可省略用户名。"
+        )
+
+    # ---------- AstrBot 指令注册（桩方法：仅用于在菜单/行为列表中显示，实际逻辑在 on_message 路由） ----------
+    @filter.command("菜单")
+    async def cmd_menu(self, event: AstrMessageEvent):
+        """显示 HMP Bot 指令菜单。"""
+        return
+
+    @filter.command("查询")
+    async def cmd_query(self, event: AstrMessageEvent, handle: str | None = None):
+        """查询 HaulMP 玩家资料（分组展示全部字段）。"""
+        return
+
+    @filter.command("搜人")
+    async def cmd_search(self, event: AstrMessageEvent, keyword: str | None = None):
+        """按用户名/显示名检索用户，支持字段筛选。"""
+        return
+
+    @filter.command("绑定")
+    async def cmd_bind(self, event: AstrMessageEvent, handle: str | None = None):
+        """绑定 HaulMP 论坛账号（最多 3 个，首个为主账号）。"""
+        return
+
+    @filter.command("解绑")
+    async def cmd_unbind(self, event: AstrMessageEvent, arg: str | None = None):
+        """解绑 HaulMP 论坛账号（序号/用户名/全部）。"""
+        return
+
+    @filter.command("我的绑定")
+    async def cmd_my(self, event: AstrMessageEvent):
+        """查看已绑定的 HaulMP 账号列表。"""
+        return
+
+    @filter.command("服务器")
+    async def cmd_server(self, event: AstrMessageEvent):
+        """查询 HaulMP 服务器状态（在线人数/客户端版本）。"""
+        return
+
+    @filter.command("定位")
+    async def cmd_locate(self, event: AstrMessageEvent, handle: str | None = None):
+        """查询玩家实时位置（地图图片，标注附近玩家）。"""
+        return
+
+    @filter.command("路况")
+    async def cmd_traffic(self, event: AstrMessageEvent):
+        """全量在线玩家路况（地图图片 + 行驶/停靠统计）。"""
+        return
 
     async def terminate(self):
         """插件被卸载/停用时会调用，可做资源清理。"""
