@@ -117,6 +117,26 @@ def _haversine_km(lon1, lat1, lon2, lat2):
     return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+def _url_image(url):
+    """把网络图片 URL 包装成图片消息组件（API 兼容同上）。"""
+    from_url = getattr(getattr(Comp, "Image", None), "fromURL", None)
+    if callable(from_url):
+        return from_url(url)
+    return Comp.Image(file=url)
+
+
+def _local_image(path):
+    """把本地图片路径包装成图片消息组件。
+
+    不同 AstrBot 版本的 Image API 略有差异：优先使用官方推荐的
+    Image.fromFileSystem()，该方法不存在时退回 Image(file=...)。
+    """
+    from_fs = getattr(getattr(Comp, "Image", None), "fromFileSystem", None)
+    if callable(from_fs):
+        return from_fs(path)
+    return Comp.Image(file=path)
+
+
 class HmpBotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -266,7 +286,7 @@ class HmpBotPlugin(Star):
             if avatar:
                 if avatar.startswith("/"):
                     avatar = FORUM_BASE + avatar
-                return [Comp.Image.fromURL(avatar), Comp.Plain(text)]
+                return [_url_image(avatar), Comp.Plain(text)]
         return text
 
     # ---------- 业务逻辑：绑定 ----------
@@ -495,7 +515,9 @@ class HmpBotPlugin(Star):
         if ghost:
             stats.append("⚠️安全区")
 
-        try:
+        svg_path = os.path.join(self.maps_dir, f"locate_{uuid.uuid4().hex}.svg")
+
+        def _render():
             svg = map_render.build_map_svg(
                 f"HaulMP 实时定位 · {name}", (lon, lat), points,
                 stats=stats, zoom=locate_zoom, tile_zoom=locate_tile_zoom,
@@ -503,9 +525,12 @@ class HmpBotPlugin(Star):
             )
             if not svg:
                 raise RuntimeError("SVG 渲染不可用（缺少 mapbox-vector-tile）")
-            svg_path = os.path.join(self.maps_dir, f"locate_{uuid.uuid4().hex}.svg")
             with open(svg_path, "w", encoding="utf-8") as fh:
                 fh.write(svg)
+
+        try:
+            # 出图需抓取网络瓦片（可能数秒），放到线程执行以免阻塞事件循环
+            await asyncio.to_thread(_render)
         except Exception as e:
             logger.warning("渲染定位地图失败: %s", e)
             return f"❌ 地图渲染失败：{e}"
@@ -517,7 +542,7 @@ class HmpBotPlugin(Star):
             + f"，附近 60km 内 {len(nearby)} 人"
             + (f"（图中可见 {len(in_view)} 人）。" if in_view else "。")
         )
-        return [Comp.Plain(summary), Comp.Image(path=svg_path)]
+        return [Comp.Plain(summary), _local_image(svg_path)]
 
     # ---------- 业务逻辑：路况 ----------
     async def _do_traffic(self) -> list | str:
@@ -564,16 +589,21 @@ class HmpBotPlugin(Star):
                 f"{status.get('players')}/{status.get('maxPlayers')}"
             )
 
-        try:
+        svg_path = os.path.join(self.maps_dir, f"traffic_{uuid.uuid4().hex}.svg")
+
+        def _render():
             svg = map_render.build_map_svg(
                 "HaulMP 实时路况", center, points, stats=stats, zoom=zoom,
                 width=map_w, height=map_h,
             )
             if not svg:
                 raise RuntimeError("SVG 渲染不可用（缺少 mapbox-vector-tile）")
-            svg_path = os.path.join(self.maps_dir, f"traffic_{uuid.uuid4().hex}.svg")
             with open(svg_path, "w", encoding="utf-8") as fh:
                 fh.write(svg)
+
+        try:
+            # 出图需抓取网络瓦片（可能数秒），放到线程执行以免阻塞事件循环
+            await asyncio.to_thread(_render)
         except Exception as e:
             logger.warning("渲染路况地图失败: %s", e)
             return f"❌ 地图渲染失败：{e}"
@@ -582,7 +612,7 @@ class HmpBotPlugin(Star):
             f"🚦 HaulMP 实时路况：在线 {total}，行驶 {moving}，"
             f"停靠 {total - moving}，安全区 {ghost}。"
         )
-        return [Comp.Plain(summary), Comp.Image(path=svg_path)]
+        return [Comp.Plain(summary), _local_image(svg_path)]
 
     # ---------- 事件监听（接收所有消息，正则路由） ----------
     @filter.event_message_type(filter.EventMessageType.ALL)
