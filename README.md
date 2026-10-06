@@ -1,14 +1,168 @@
-# astrbot-plugin-helloworld
+# astrbot_plugin_hmp_bot
 
-AstrBot 插件模板 / A template plugin for AstrBot plugin feature
+> HaulMP（卡车模拟联机平台）AstrBot 插件：**账号绑定 · 玩家资料 · 服务器状态 · 实时定位 · 全量路况**
 
-> [!NOTE]
-> This repo is just a template of [AstrBot](https://github.com/AstrBotDevs/AstrBot) Plugin.
-> 
-> [AstrBot](https://github.com/AstrBotDevs/AstrBot) is an agentic assistant for both personal and group conversations. It can be deployed across dozens of mainstream instant messaging platforms, including QQ, Telegram, Feishu, DingTalk, Slack, LINE, Discord, Matrix, etc. In addition, it provides a reliable and extensible conversational AI infrastructure for individuals, developers, and teams. Whether you need a personal AI companion, an intelligent customer support agent, an automation assistant, or an enterprise knowledge base, AstrBot enables you to quickly build AI applications directly within your existing messaging workflows.
+---
 
-# Supports
+## 简介
 
-- [AstrBot Repo](https://github.com/AstrBotDevs/AstrBot)
-- [AstrBot Plugin Development Docs (Chinese)](https://docs.astrbot.app/dev/star/plugin-new.html)
-- [AstrBot Plugin Development Docs (English)](https://docs.astrbot.app/en/dev/star/plugin-new.html)
+`astrbot_plugin_hmp_bot` 是一个运行在 [AstrBot](https://astrbot.app) 上的聊天机器人插件，面向 HaulMP（欧卡/美卡联机平台）玩家与车队。
+
+绑定 HaulMP 论坛账号后，群成员可以在聊天中一键查询玩家资料与服务器状态，**实时定位任意在线玩家**（返回带真实经纬度、道路、建筑与附近玩家的地图图片），或查看**全服实时路况**（所有在线玩家的分布与行驶状态）。
+
+地图由后端抓取 **HaulMP 官网同源矢量瓦片**后直接生成 **SVG 矢量图**（无需浏览器、无需无头渲染）：配色、线宽、图层与官网一致，矢量路径可无限放大不模糊。
+
+---
+
+## 核心功能
+
+### 1. 账号绑定（每人最多 3 个）
+
+把聊天账号与 HaulMP 论坛账号关联，之后可省略用户名直接查询。
+
+| 命令 | 说明 |
+| --- | --- |
+| `绑定 [用户名]` | 绑定一个 HaulMP 论坛用户名（首个绑定自动设为主账号） |
+| `我的绑定` | 查看自己已绑定的账号列表 |
+| `解绑 [序号 / 用户名 / 全部]` | 解除绑定 |
+
+### 2. 玩家资料查询
+
+| 命令 | 说明 |
+| --- | --- |
+| `查询 [用户名]` | 查询指定玩家资料（未绑定时必须带用户名） |
+| `查询` | 已绑定则直接查询主账号 |
+
+返回内容：用户名、显示名称、在线状态、历史里程、所属车队、国家、头衔、注册时间、总交付次数、驾驶时长，以及玩家头像。
+
+支持两种输出格式（配置项 `output`）：`text` 纯文本（默认）或 `image` 头像 + 文本图文卡片。
+
+### 3. 服务器状态
+
+| 命令 | 说明 |
+| --- | --- |
+| `服务器H` | 查询 HaulMP 服务器在线状态 |
+
+返回：是否在线、当前人数 / 上限、协议与客户端版本、公告与发布时间。
+
+### 4. 实时定位（地图图片）
+
+| 命令 | 说明 |
+| --- | --- |
+| `定位 [用户名]` | 定位指定在线玩家（已绑定可省略用户名，直接定位主账号） |
+
+- 以被查玩家为画面中心，缩放级别 **z13**（与官网「Follow player」完全一致），视野约 **±2.8 km**。
+- 被查玩家：**红色朝向箭头**（尖端即真实位置，朝向取自游戏 `h` 字段）。
+- 附近玩家：**蓝色朝向箭头** + 名称 + 距离；标签自动避让，避免互相压叠。
+- 底图与官网同源：海陆来自官方 `water.geojson`，道路 / 厂区 / 城市来自官方矢量瓦片，深色主题配色与线宽公式逐项对齐官网。
+- 底部信息栏：行驶 / 停靠状态、真实经纬度、是否处于安全区；正文附带 60 km 内人数与图中可见人数统计。
+
+### 5. 全量路况（地图图片）
+
+| 命令 | 说明 |
+| --- | --- |
+| `路况` | 查看全服实时路况 |
+
+- 自动按全体在线玩家的分布取景（中心、缩放、画幅自适应），标注所有在线玩家。
+- 统计信息：地图在线人数、行驶数、停靠数、安全区人数，以及服务器在线状态。
+
+> 所有命令均兼容带 `/` 与不带 `/` 两种写法（如 `/定位 johndoe` 与 `定位 johndoe`）。
+> 查询玩家时忽略大小写与变音符号，输入 `Jagermeister` 也能命中 `Jägermeister`。
+
+---
+
+## 主要用途与适用场景
+
+| 场景 | 说明 |
+| --- | --- |
+| **车队集结 / 编队管理** | 一键定位队员，直观看到谁到了、谁还在路上、大家是否聚在同一区域 |
+| **找队友 / 找同行** | 定位目标玩家，并查看其周边 60 km 内还有哪些玩家 |
+| **全服路况观察** | 看当前有多少人在跑、哪些区域拥堵、服务器是否在线 |
+| **新成员审核** | 查询申请人的里程、车队、司龄、交付量等资料 |
+| **群内互动与播报** | 定位/路况均返回图片，适合直接转发到群；也可配合 AstrBot 定时任务做整点播报 |
+
+---
+
+## 安装与配置
+
+1. 将插件目录放入 `AstrBot/data/plugins/astrbot_plugin_hmp_bot/`。
+2. 安装依赖（`requirements.txt`）：
+
+   ```
+   mapbox-vector-tile>=1.2.0   # 解析 HaulMP 官方 .pbf 矢量瓦片
+   aiohttp>=3.8.0              # 异步网络请求
+   ```
+
+3. 在 AstrBot WebUI「插件」页面刷新插件卡片即可热重载。
+4. 配置项（WebUI 可视化设置）：
+
+   | 配置项 | 类型 | 默认 | 说明 |
+   | --- | --- | --- | --- |
+   | `output` | string | `text` | 资料查询输出格式：`text`（纯文本）或 `image`（头像 + 文本图文卡片） |
+
+> 运行环境需能访问 `map.haulmp.com`（首次出图会抓取瓦片，之后走内存缓存；瓦片并发预取，单张地图通常 5–10 秒）。
+
+---
+
+## 数据来源与坐标换算
+
+| 用途 | 接口 |
+| --- | --- |
+| 玩家资料 | `https://forum.haulmp.com/api/forum` |
+| 服务器状态 | `https://haulmp.com/api/status` |
+| 实时玩家位置 | `https://map.haulmp.com/api/live` |
+| 矢量瓦片 | `https://map.haulmp.com/tiles/{z}/{x}/{y}.pbf` |
+| 海陆边界 | `https://map.haulmp.com/water.geojson` |
+
+- **游戏坐标 → 真实经纬度**：复刻官网的球面 LCC 逆投影
+  （`+proj=lcc +R=6370997 +lat_1=37 +lat_2=65 +lat_0=50 +lon_0=15`）及其区域缩放常数，
+  与官网打点结果逐位一致。
+- **朝向 → 屏幕方位角**：复刻官网 `lM()`，将 `(x - sin h, z - cos h)` 与 `(x, z)` 一并投影后
+  在墨卡托空间求解方位角，抵消 LCC → 墨卡托的形变。
+- 地图数据版权归 **SCS Software**（`ETS2 map data © SCS Software`）。
+
+---
+
+## 目录结构
+
+```
+astrbot_plugin_hmp_bot/
+  metadata.yaml       # 插件元数据
+  main.py             # 插件主体：命令路由、接口请求、格式化与地图调用
+  map_render.py       # 服务端 SVG 地图渲染（瓦片解码、海陆、样式、标记）
+  _conf_schema.json   # 配置 Schema（WebUI 可视化配置）
+  requirements.txt    # pip 依赖
+  README.md
+```
+
+## 数据持久化
+
+运行期数据统一写入 AstrBot 数据目录，插件更新不会覆盖：
+
+```
+data/plugins/astrbot_plugin_hmp_bot/
+  haulmp_bindings.json   # 用户绑定关系
+  maps/                  # 生成的定位 / 路况地图（SVG）
+```
+
+---
+
+## 开发约定
+
+- 持久化数据写入 `data/` 目录，不写入插件自身目录。
+- 网络请求统一使用 `aiohttp`，不使用 `requests`。
+- 日志使用 `from astrbot.api import logger`。
+- 提交前使用 `ruff` 格式化代码。
+
+## 调试
+
+启动 AstrBot 本体后，将本插件放入 `AstrBot/data/plugins/`，
+在 WebUI「插件」页面对应卡片点击刷新图标即可热重载。
+
+---
+
+## 作者
+
+- 作者：**jingyu8127**
+- 仓库：<https://github.com/jingyu8127/astrbot_plugin_hmp_bot>
+- 版本：1.2.0

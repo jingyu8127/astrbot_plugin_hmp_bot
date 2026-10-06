@@ -1,6 +1,9 @@
-name: helloworld # 插件唯一识别名，以 astrbot_plugin_ 前缀开头
-display_name: helloworld # 用于展示的名字，可以是方便人类阅读的名字（需要版本 >= v4.5.0，低版本不会报错，请放心填写）
-desc: AstrBot 插件示例。 # 插件简短描述
-version: v1.3.0 # 插件版本号。格式：v1.1.1 或者 v1.1
-author: Soulter # 作者
-repo: https://github.com/Soulter/helloworld # 插件的仓库地址
+name: astrbot_plugin_hmp_bot
+author: jingyu8127
+desc: HaulMP 平台插件 —— 绑定 HaulMP 论坛账号，查询玩家资料/服务器状态，并支持实时定位（真实经纬度 + 附近玩家）与全量路况（基于 map.haulmp.com 实时接口）。
+version: 1.2.0
+repo: https://github.com/jingyu8127/astrbot_plugin_hmp_bot
+display_name: HMP Bot
+short_desc: HaulMP 玩家资料查询、账号绑定、实时定位与路况
+# 声明兼容的 AstrBot 版本范围（可选，PEP 440 格式，不要加 v 前缀）
+# astrbot_version: ">=4.16,<5"

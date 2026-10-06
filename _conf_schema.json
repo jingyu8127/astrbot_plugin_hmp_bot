@@ -1,0 +1,7 @@
+{
+  "output": {
+    "description": "资料查询输出格式：text（纯文本，默认）或 image（头像+文本图文卡片）",
+    "type": "string",
+    "default": "text"
+  }
+}
