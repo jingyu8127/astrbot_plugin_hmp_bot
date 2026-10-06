@@ -1,5 +1,6 @@
 # HaulMP 机器人插件依赖
-# 矢量地图：后端抓取并解析 HaulMP 官方 .pbf 矢量瓦片，直接生成 SVG 矢量图
-# （道路/建筑/海面/城市/标记均为矢量路径，可无限放大不模糊）
+# Pillow 用于本地渲染地图图片（通常 AstrBot 环境已自带）
+Pillow>=9.0
+# mapbox-vector-tile 用于解码 HaulMP 官方矢量瓦片（真实 ETS2 路网）
+# 若未安装，插件会自动回退到合成地图（无路网）。
 mapbox-vector-tile>=1.2.0
-aiohttp>=3.8.0
