@@ -4,7 +4,7 @@
 ![:astrbot_plugin_hmp_bot](https://count.getloli.com/@:astrbot_plugin_hmp_bot?theme=minecraft)
 
 
-HaulMP（永魂卡车模拟联机）查询机器人，用于查询玩家资料、检索用户、服务器状态、实时定位及全量路况等。
+HaulMP（卡车模拟联机）查询机器人，用于查询玩家资料、检索用户、服务器状态、实时定位及全量路况等。
 
 > [!NOTE]
 > 「定位」「路况」为图片输出，由**本地 Pillow 渲染**生成（非文转图服务），默认纯离线出图。安装 `mapbox-vector-tile` 后可显示真实 ETS2 路网（需配置离线瓦片或开启在线回退）。
