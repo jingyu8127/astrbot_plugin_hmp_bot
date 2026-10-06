@@ -17,10 +17,17 @@ import os
 import re
 import json
 import math
+import sys
 import asyncio
 import uuid
 import unicodedata
 import aiohttp
+
+# 确保插件自身目录在 sys.path 上，兼容不同插件加载方式下的 `import map_render`
+_PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
+if _PLUGIN_DIR not in sys.path:
+    sys.path.insert(0, _PLUGIN_DIR)
+
 import map_render
 
 from astrbot.api import AstrBotConfig, logger
