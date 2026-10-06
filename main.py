@@ -1,5 +1,14 @@
 """
-HMP Bot —— HaulMP 平台查询插件
+HMP Bot —— HaulMP 平台查询插件（基于 AstrBot）。
+
+开发要点（来自 AstrBot 官方插件开发文档）：
+- 插件类必须继承自 astrbot.api.star.Star，且文件名必须为 main.py。
+- 处理函数（Handler）必须写在插件类内部，前两个参数固定为 self 和 event。
+- 回复消息用 `yield event.plain_result(...)`（生成器方式），多条内容用
+  `yield event.chain_result([组件, ...])`。
+- 日志请使用 astrbot.api.logger，不要用标准 logging 模块。
+- 持久化数据存放到 data 目录，避免插件更新/重装时被覆盖。
+- 网络请求使用 aiohttp 等异步库，禁止使用 requests。
 
 功能与命令：
 - 绑定 HaulMP 论坛用户名：  绑定 [用户名]        （每人最多 3 个，首个为主账号）
@@ -11,23 +20,18 @@ HMP Bot —— HaulMP 平台查询插件
 - 服务器状态：              服务器H            （在线人数 / 客户端版本）
 - 实时定位：                定位 [用户名]        （未绑定必填；已绑定可省略直接定位主账号）
 - 实时路况：                路况                （全量在线玩家分布 / 行驶停靠统计）
+定位与路况均返回**地图图片**：先把游戏坐标经 LCC 投影换算为真实经纬度，再本地渲染
+成地图（目标红色标注 + 附近玩家 / 全量玩家散布 + 经纬网格 + 比例尺）。
+输出格式由配置项 output 控制：text（纯文本，默认）或 image（头像+文本图文卡片，仅作用于查询）。
 """
 
 import os
 import re
 import json
 import math
-import sys
 import asyncio
 import uuid
-import unicodedata
 import aiohttp
-
-# 确保插件自身目录在 sys.path 上，兼容不同插件加载方式下的 `import map_render`
-_PLUGIN_DIR = os.path.dirname(os.path.abspath(__file__))
-if _PLUGIN_DIR not in sys.path:
-    sys.path.insert(0, _PLUGIN_DIR)
-
 import map_render
 
 from astrbot.api import AstrBotConfig, logger
@@ -48,6 +52,33 @@ _HEADERS = {
     )
 }
 
+# 「搜人」筛选字段别名 -> (会员目录字段名, 类型)。目录对象不含 company/bio/links/driving 等
+# 仅「查询」详情才有，见 _DETAIL_ONLY_FIELDS。类型：str 子串 / num 数值比较 / bool 布尔。
+_SEARCH_FIELDS = {
+    "用户名": ("handle", "str"), "名字": ("handle", "str"), "name": ("handle", "str"),
+    "显示名": ("displayName", "str"), "显示名称": ("displayName", "str"),
+    "用户id": ("id", "str"), "id": ("id", "str"),
+    "角色": ("role", "str"),
+    "管理员": ("admin", "bool"), "admin": ("admin", "bool"),
+    "支持者": ("supporter", "num"), "支持者等级": ("supporter", "num"),
+    "在线": ("online", "bool"), "在线状态": ("online", "bool"),
+    "车队成员": ("vtcMember", "bool"), "vtc成员": ("vtcMember", "bool"),
+    "里程": ("km", "num"), "总里程": ("km", "num"), "驾驶里程": ("km", "num"),
+    "交付": ("deliveries", "num"), "交付次数": ("deliveries", "num"),
+    "最长单程": ("longestKm", "num"),
+    "活跃天数": ("activeDays", "num"),
+    "帖子": ("posts", "num"), "帖子数": ("posts", "num"),
+    "声望": ("reputation", "num"),
+    "国家": ("country", "str"),
+    "签名": ("signature", "str"),
+    "注册时间": ("memberSince", "str"),
+    "最后活跃": ("lastActive", "str"),
+}
+# 这些字段只在「查询」的详情里，目录接口没有，无法用于「搜人」筛选
+_DETAIL_ONLY_FIELDS = {"网站", "个人网站", "简介", "bio", "车队名称", "车队标签", "驾驶时长", "时长"}
+_FILTER_RE = re.compile(r"^(.+?)(>=|<=|!=|>|<|=)(.+)$")
+_SEARCH_MAX_PAGES = 5          # 有筛选条件时最多扫描的目录页数（每页 40）
+
 # 单监听器 + 正则路由：兼容带 / 或不带 / 的写法，且能优雅地处理
 # “查询”（无参数）与“查询 xxx”（带参数）等情况。
 RE_QUERY = re.compile(r"^(?:/)?查询\s*(.*)$")
@@ -57,6 +88,8 @@ RE_UNBIND = re.compile(r"^(?:/)?解绑\s*(.*)$")
 RE_SERVER = re.compile(r"^(?:/)?服务器\s*$")
 RE_LOCATE = re.compile(r"^(?:/)?定位\s*(.*)$")
 RE_TRAFFIC = re.compile(r"^(?:/)?路况\s*$")
+RE_SEARCH = re.compile(r"^(?:/)?搜人\s*(.*)$")
+RE_MENU = re.compile(r"^(?:/)?菜单\s*$")
 
 # ---------- 实时地图投影（复刻 map 源码 src/projection.js 的球面 LCC） ----------
 LIVE_URL = "https://map.haulmp.com/api/live"
@@ -92,22 +125,6 @@ def game_to_lonlat(x, z):
     return _lcc_inverse(X, Y)
 
 
-def heading_to_bearing(x, z, h):
-    """游戏朝向 h -> 屏幕方位角（度，0=正北，顺时针）。
-
-    复刻官网 lM()：把 (x - sin h, z - cos h) 与 (x, z) 都投影到经纬度，
-    再在墨卡托空间里求方位角，从而抵消 LCC→墨卡托的形变。
-    """
-    lon1, lat1 = game_to_lonlat(x, z)
-    lon2, lat2 = game_to_lonlat(x - math.sin(h), z - math.cos(h))
-
-    def _my(lat):
-        return math.log(math.tan(math.pi / 4 + lat * math.pi / 360))
-
-    return math.degrees(math.atan2((lon2 - lon1) * math.pi / 180,
-                                   _my(lat2) - _my(lat1)))
-
-
 def _haversine_km(lon1, lat1, lon2, lat2):
     r = 6371.0
     p1, p2 = math.radians(lat1), math.radians(lat2)
@@ -129,17 +146,6 @@ class HmpBotPlugin(Star):
         # 生成的定位/路况地图图片存放目录
         self.maps_dir = os.path.abspath(os.path.join(self.data_dir, "maps"))
         os.makedirs(self.maps_dir, exist_ok=True)
-
-        # 后台预热海面/字体等静态资源（避免首次出图时再等网络）
-        try:
-            import threading
-            threading.Thread(
-                target=lambda: (map_render._load_water_b64(),
-                                map_render._load_glyphs_b64()),
-                daemon=True,
-            ).start()
-        except Exception:
-            pass
 
     # ---------- 绑定存储（平台用户 -> [HaulMP 账号列表]） ----------
     def _load_bindings(self) -> dict:
@@ -205,33 +211,194 @@ class HmpBotPlugin(Star):
     def _format_profile(member: dict) -> str:
         handle = member.get("handle") or "?"
         display = member.get("displayName") or handle
-        status = "🟢 在线" if member.get("online") else "⚪ 离线"
-        km = member.get("km") or 0
+        online = "🟢 在线" if member.get("online") else "⚪ 离线"
+        admin = bool(member.get("admin"))
+        role = member.get("role") or "成员"
+        supporter = member.get("supporter") or 0
         company = member.get("company") or {}
-        if company.get("name"):
-            team = f"[{company.get('tag', '')}] {company.get('name')}"
-        else:
-            team = "未加入车队"
-        member_since = (member.get("memberSince") or "")[:10]
-        country = member.get("country") or "未知"
-        title = member.get("title") or "无"
-        deliveries = member.get("deliveries") or 0
         driving = member.get("driving") or {}
-        hours = driving.get("hours") or 0
+        links = member.get("links") or {}
+        active_days = member.get("activeDays")
+        website = links.get("website") or ""
+        signature = (member.get("signature") or "").strip()
+        bio = (member.get("bio") or "").strip()
 
         lines = [
             "📋 HaulMP 玩家资料",
             f"用户名：{handle}",
-            f"显示名称：{display}",
-            f"在线状态：{status}",
-            f"历史里程：{km:,} km",
-            f"所属车队：{team}",
-            f"国家：{country}",
-            f"头衔：{title}",
-            f"注册时间：{member_since}",
-            f"总交付：{deliveries:,} 次",
-            f"驾驶时长：{hours:,} 小时",
+            f"显示名：{display}",
+            f"用户ID：{member.get('id') or '—'}",
+            f"在线状态：{online}",
+            f"角色：{role}{'（管理员）' if admin else ''}",
+            f"支持者等级：Lv{supporter}",
+            f"注册时间：{(member.get('memberSince') or '')[:10] or '—'}",
+            f"最后活跃：{(member.get('lastActive') or '')[:19] or '—'}",
+            f"活跃天数：{active_days if active_days is not None else 0} 天",
+            f"国家：{member.get('country') or '未知'}",
+            f"头衔：{member.get('title') or '无'}",
+            f"个人网站：{website or '无'}",
+            f"签名：{signature or '无'}",
+            f"简介：{bio or '无'}",
+            "— 车队 —",
+            f"车队成员：{'是' if member.get('vtcMember') else '否'}",
+            f"车队名称：{company.get('name') or '无'}",
+            f"车队标签：{company.get('tag') or '无'}",
+            "— 驾驶指标 —",
+            f"总驾驶里程：{(member.get('km') or 0):,} km",
+            f"驾驶时长：{(driving.get('hours') or 0):,} 小时",
+            f"完成交付：{(member.get('deliveries') or 0):,} 次",
+            f"最长单程：{(member.get('longestKm') or 0):,} km",
+            "— 论坛指标 —",
+            f"帖子：{(member.get('posts') or 0):,}",
+            f"声望：{member.get('reputation') or 0}",
+            f"主题：{(member.get('threads') or 0):,}",
+            f"解答：{member.get('solutions') or 0}",
+            f"零罚交付：{member.get('cleanDeliveries') or 0}",
+            f"夜间交付：{member.get('nightDeliveries') or 0}",
+            f"车队活动：{member.get('convoys') or 0}",
         ]
+        return "\n".join(lines)
+
+    # ---------- 检索：会员目录筛选与格式化 ----------
+    @staticmethod
+    def _parse_filter(token: str):
+        """解析单个筛选条件，返回 (字段, 操作符, 值, 类型)；无法解析返回 None。"""
+        m = _FILTER_RE.match(token)
+        if not m:
+            key = _SEARCH_FIELDS.get(token)
+            if key and key[1] == "bool":
+                return (key[0], "=", True, "bool")
+            return None
+        key = _SEARCH_FIELDS.get(m.group(1)) or _SEARCH_FIELDS.get(m.group(1).lower())
+        if not key:
+            return None
+        name, typ = key
+        op = m.group(2)
+        raw = m.group(3).strip()
+        if typ == "bool":
+            b = raw.lower() in ("1", "true", "yes", "y", "是", "真", "有", "yes")
+            return (name, op, b, "bool")
+        if typ == "num":
+            try:
+                return (name, op, float(raw), "num")
+            except ValueError:
+                return None
+        return (name, op, raw, "str")
+
+    @staticmethod
+    def _is_detail_only(token: str):
+        m = _FILTER_RE.match(token)
+        name = (m.group(1) if m else token).strip()
+        return name in _DETAIL_ONLY_FIELDS or name.lower() in _DETAIL_ONLY_FIELDS
+
+    @staticmethod
+    def _cond_pass(member: dict, name: str, op: str, val, typ: str) -> bool:
+        if typ == "bool":
+            v = bool(member.get(name))
+            return (v == val) if op in ("=", "==") else (v != val)
+        if typ == "num":
+            try:
+                v = float(member.get(name) or 0)
+            except (TypeError, ValueError):
+                v = 0.0
+            if op == ">":
+                return v > val
+            if op == "<":
+                return v < val
+            if op == ">=":
+                return v >= val
+            if op == "<=":
+                return v <= val
+            if op == "!=":
+                return v != val
+            return v == val
+        v = str(member.get(name) or "").lower()
+        s = str(val).lower()
+        return (s in v) if op in ("=", "==") else (s not in v)
+
+    @staticmethod
+    def _format_member_line(i: int, m: dict) -> str:
+        handle = m.get("handle") or "?"
+        disp = m.get("displayName") or ""
+        disp_s = f"（{disp}）" if disp and disp != handle else ""
+        online = "🟢" if m.get("online") else "⚪"
+        km = f"里程{(m.get('km') or 0):,}km"
+        dvd = f"交付{(m.get('deliveries') or 0)}"
+        role = m.get("role") or ""
+        flags = []
+        if m.get("admin"):
+            flags.append("管理员")
+        if m.get("vtcMember"):
+            flags.append("车队")
+        if m.get("supporter"):
+            flags.append(f"Lv{m.get('supporter')}")
+        return f"{i}. {online} {handle}{disp_s}  {km} {dvd} {role} {' '.join(flags)}".strip()
+
+    # ---------- 网络：检索会员目录 ----------
+    async def _fetch_members(self, keyword: str = "", page: int = 1) -> dict | None:
+        params = [("page", str(page))]
+        if keyword:
+            params.append(("q", keyword))
+        try:
+            async with aiohttp.ClientSession() as session:
+                async with session.get(
+                    f"{FORUM_API}/members", headers=_HEADERS, params=params,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp:
+                    if resp.status != 200:
+                        return None
+                    return await resp.json()
+        except Exception as e:
+            logger.warning("检索 HaulMP 会员失败 q=%s: %s", keyword, e)
+            return None
+
+    # ---------- 业务逻辑：搜人（按字段检索/筛选） ----------
+    async def _do_search(self, event: AstrMessageEvent, arg: str):
+        arg = (arg or "").strip()
+        tokens = arg.split()
+        keyword = tokens[0] if tokens else ""
+        raw_filters = tokens[1:]
+        conds, hints = [], []
+        for t in raw_filters:
+            c = self._parse_filter(t)
+            if c:
+                conds.append(c)
+            elif self._is_detail_only(t):
+                hints.append(f"「{t}」仅在「查询」详情中，无法用于筛选")
+            else:
+                hints.append(f"无法识别筛选条件「{t}」")
+
+        max_pages = _SEARCH_MAX_PAGES if conds else 1
+        members, total, scanned = [], 0, 0
+        for page in range(1, max_pages + 1):
+            data = await self._fetch_members(keyword, page)
+            if not data:
+                break
+            members.extend(data.get("members") or [])
+            total = data.get("total", len(members))
+            scanned += 1
+            if data.get("pages", 1) <= page:
+                break
+
+        if not members:
+            return f"未检索到「{keyword}」相关的 HaulMP 用户。"
+
+        filtered = [m for m in members if all(self._cond_pass(m, *c) for c in conds)]
+        shown = filtered[:15]
+        header = f"🔎 检索「{keyword or '全部'}」共 {total} 人"
+        if conds:
+            header += f"，筛选后 {len(filtered)} 人"
+        if scanned > 1:
+            header += f"（仅扫描前 {scanned} 页）"
+        lines = [header]
+        if hints:
+            lines.append("提示：" + "；".join(hints))
+        if not shown:
+            lines.append("（无符合条件的结果）")
+        for i, m in enumerate(shown, 1):
+            lines.append(self._format_member_line(i, m))
+        if len(filtered) > 15:
+            lines.append("… 仅显示前 15 条，可用「查询 <用户名>」查看完整资料")
         return "\n".join(lines)
 
     # ---------- 格式化：服务器状态 ----------
@@ -383,7 +550,10 @@ class HmpBotPlugin(Star):
         # 场景二：已绑定（省略用户名）或未绑定时显式提供了用户名
         member = await self._fetch_profile(handle)
         if not member:
-            return f"未找到 HaulMP 用户「{handle}」，请确认用户名是否正确。"
+            return (
+                f"未找到 HaulMP 用户「{handle}」。\n"
+                f"提示：可用「搜人 {handle}」按用户名/显示名模糊检索。"
+            )
         return member  # 返回 member 字典，由监听器决定输出格式
 
     # ---------- 业务逻辑：服务器状态 ----------
@@ -396,18 +566,11 @@ class HmpBotPlugin(Star):
     # ---------- 业务逻辑：定位 ----------
     @staticmethod
     def _find_player(players, handle):
-        """按名字查找玩家：先精确、再子串；均忽略大小写与变音符号
-        （复刻官网 Uo() 的 NFD 分解后去组合符处理，使 Jagermeister 能命中
-        Jägermeister）。"""
-        def _norm(s):
-            s = unicodedata.normalize("NFD", str(s or ""))
-            s = "".join(c for c in s if not unicodedata.combining(c))
-            return s.lower().strip()
-        h = _norm(handle)
-        exact = next((p for p in players if _norm(p.get("name")) == h), None)
+        h = (handle or "").lower()
+        exact = next((p for p in players if (p.get("name") or "").lower() == h), None)
         if exact:
             return exact
-        return next((p for p in players if h in _norm(p.get("name"))), None)
+        return next((p for p in players if h in (p.get("name") or "").lower()), None)
 
     async def _do_locate(self, event: AstrMessageEvent, handle: str):
         handle = handle.strip().lstrip("@")
@@ -441,7 +604,7 @@ class HmpBotPlugin(Star):
         moving = speed > 0.5
         name = target.get("name")
 
-        # 附近 60km 内的其他玩家（用于文案统计）
+        # 附近 60km 内的其他玩家（用于地图标点与文案）
         nearby = []
         for p in players:
             if p.get("id") == target.get("id"):
@@ -455,37 +618,14 @@ class HmpBotPlugin(Star):
                 nearby.append((d, p, plon, plat))
         nearby.sort(key=lambda t: t[0])
 
-        # 定位用 z13（与官网「Follow player」Uu(mr(x,z),13) 完全一致）。
-        # 注意：不要用 z14 瓦片过采样 —— 实测 z14 瓦片与游戏地图错位
-        # （同一位置 z13 距路 11m、z14 却有 1198m），z13 才是准确数据源。
-        locate_zoom = 13
-        locate_tile_zoom = None
-        # 宽幅画幅（比例接近官网视图）。竖幅会被聊天端按高度缩放，导致两侧留白
-        locate_w, locate_h = 1280, 900
-        m_per_px = map_render.meters_per_px(lat, locate_zoom)
-        # 取“半高”作为可见半径，保证标点在画幅内
-        view_radius_km = (locate_h / 2) * m_per_px / 1000.0
-        in_view = [t for t in nearby if t[0] <= view_radius_km * 1.05]
-
-        def _brg(pp):
-            """玩家朝向 -> 屏幕方位角度；无 h 时返回 None（画成圆点）。"""
-            try:
-                hv = pp.get("h")
-                if hv is None:
-                    return None
-                return heading_to_bearing(float(pp["x"]), float(pp["z"]), float(hv))
-            except Exception:
-                return None
-
         points = [{
             "lon": lon, "lat": lat, "name": name, "kind": "target",
             "sub": f"{lat:.4f}°N,{lon:.4f}°E  {max(0, round(speed))}km/h",
-            "bearing": _brg(target),
         }]
-        for d, p, plon, plat in in_view[:30]:
+        for d, p, plon, plat in nearby[:15]:
             points.append({
                 "lon": plon, "lat": plat, "name": p.get("name"),
-                "kind": "near", "sub": f"{d:.0f}km", "bearing": _brg(p),
+                "kind": "near", "sub": f"{d:.0f}km",
             })
 
         stats = [
@@ -496,16 +636,10 @@ class HmpBotPlugin(Star):
             stats.append("⚠️安全区")
 
         try:
-            svg = map_render.build_map_svg(
-                f"HaulMP 实时定位 · {name}", (lon, lat), points,
-                stats=stats, zoom=locate_zoom, tile_zoom=locate_tile_zoom,
-                width=locate_w, height=locate_h,
+            out_path = map_render.render_map(
+                f"HaulMP 实时定位 · {name}", (lon, lat), points, stats=stats,
+                out_path=os.path.join(self.maps_dir, f"locate_{uuid.uuid4().hex}.png"),
             )
-            if not svg:
-                raise RuntimeError("SVG 渲染不可用（缺少 mapbox-vector-tile）")
-            svg_path = os.path.join(self.maps_dir, f"locate_{uuid.uuid4().hex}.svg")
-            with open(svg_path, "w", encoding="utf-8") as fh:
-                fh.write(svg)
         except Exception as e:
             logger.warning("渲染定位地图失败: %s", e)
             return f"❌ 地图渲染失败：{e}"
@@ -514,10 +648,9 @@ class HmpBotPlugin(Star):
             f"📍 {name} 实时定位：{lat:.4f}°N, {lon:.4f}°E，"
             f"{'行驶中' if moving else '停靠'}"
             + ("，处于安全区" if ghost else "")
-            + f"，附近 60km 内 {len(nearby)} 人"
-            + (f"（图中可见 {len(in_view)} 人）。" if in_view else "。")
+            + f"，附近 60km 内 {len(nearby)} 人。"
         )
-        return [Comp.Plain(summary), Comp.Image(path=svg_path)]
+        return [Comp.Plain(summary), Comp.Image(path=out_path)]
 
     # ---------- 业务逻辑：路况 ----------
     async def _do_traffic(self) -> list | str:
@@ -532,6 +665,7 @@ class HmpBotPlugin(Star):
         ghost = sum(1 for p in players if p.get("ghost"))
 
         points = []
+        slon = slat = 0.0
         for p in players:
             try:
                 lon, lat = game_to_lonlat(float(p.get("x") or 0), float(p.get("z") or 0))
@@ -541,15 +675,9 @@ class HmpBotPlugin(Star):
                 "lon": lon, "lat": lat, "name": p.get("name"),
                 "kind": "ghost" if p.get("ghost") else "player",
             })
-        if not points:
-            return "当前地图暂无可定位的玩家。"
-        # 按全体玩家范围自适应取景（画幅贴合内容，减少空白）
-        try:
-            center, zoom, map_w, map_h = map_render.fit_view(points)
-        except Exception:
-            center = (sum(p["lon"] for p in points) / len(points),
-                      sum(p["lat"] for p in points) / len(points))
-            zoom, map_w, map_h = 4, 1080, 1080
+            slon += lon
+            slat += lat
+        center = (slon / len(points), slat / len(points))
 
         stats = [
             f"地图在线：{total}",
@@ -565,15 +693,10 @@ class HmpBotPlugin(Star):
             )
 
         try:
-            svg = map_render.build_map_svg(
-                "HaulMP 实时路况", center, points, stats=stats, zoom=zoom,
-                width=map_w, height=map_h,
+            out_path = map_render.render_map(
+                "HaulMP 实时路况", center, points, stats=stats,
+                out_path=os.path.join(self.maps_dir, f"traffic_{uuid.uuid4().hex}.png"),
             )
-            if not svg:
-                raise RuntimeError("SVG 渲染不可用（缺少 mapbox-vector-tile）")
-            svg_path = os.path.join(self.maps_dir, f"traffic_{uuid.uuid4().hex}.svg")
-            with open(svg_path, "w", encoding="utf-8") as fh:
-                fh.write(svg)
         except Exception as e:
             logger.warning("渲染路况地图失败: %s", e)
             return f"❌ 地图渲染失败：{e}"
@@ -582,7 +705,7 @@ class HmpBotPlugin(Star):
             f"🚦 HaulMP 实时路况：在线 {total}，行驶 {moving}，"
             f"停靠 {total - moving}，安全区 {ghost}。"
         )
-        return [Comp.Plain(summary), Comp.Image(path=svg_path)]
+        return [Comp.Plain(summary), Comp.Image(path=out_path)]
 
     # ---------- 事件监听（接收所有消息，正则路由） ----------
     @filter.event_message_type(filter.EventMessageType.ALL)
@@ -600,6 +723,11 @@ class HmpBotPlugin(Star):
                     yield event.plain_result(out)
                 else:
                     yield event.chain_result(out)
+            return
+
+        m = RE_SEARCH.match(text)
+        if m:
+            yield event.plain_result(await self._do_search(event, m.group(1)))
             return
 
         m = RE_BIND.match(text)
@@ -639,6 +767,74 @@ class HmpBotPlugin(Star):
             else:
                 yield event.chain_result(res)
             return
+
+        m = RE_MENU.match(text)
+        if m:
+            yield event.plain_result(self._menu_text())
+            return
+
+    # ---------- 菜单 ----------
+    @staticmethod
+    def _menu_text() -> str:
+        return (
+            "🚛 HMP Bot 指令菜单\n\n"
+            "可用命令：\n"
+            "1. 绑定 [用户名] —— 绑定 HaulMP 论坛账号（最多 3 个，首个为主账号）\n"
+            "2. 我的绑定 —— 查看已绑定账号\n"
+            "3. 解绑 [序号/用户名/全部] —— 解绑账号\n"
+            "4. 查询 [用户名] —— 查询玩家资料（分组展示全部字段）\n"
+            "5. 搜人 [关键字] [筛选条件] —— 按用户名/显示名检索用户\n"
+            "6. 服务器 —— 查询服务器状态（在线人数/客户端版本）\n"
+            "7. 定位 [用户名] —— 查询玩家实时位置（地图图片）\n"
+            "8. 路况 —— 全量在线玩家路况（地图图片）\n\n"
+            "提示：所有命令兼容带 / 或不带 / 的写法；绑定后查询/定位可省略用户名。"
+        )
+
+    # ---------- AstrBot 指令注册（桩方法：仅用于在菜单/行为列表中显示，实际逻辑在 on_message 路由） ----------
+    @filter.command("菜单")
+    async def cmd_menu(self, event: AstrMessageEvent):
+        """显示 HMP Bot 指令菜单。"""
+        return
+
+    @filter.command("查询")
+    async def cmd_query(self, event: AstrMessageEvent, handle: str | None = None):
+        """查询 HaulMP 玩家资料（分组展示全部字段）。"""
+        return
+
+    @filter.command("搜人")
+    async def cmd_search(self, event: AstrMessageEvent, keyword: str | None = None):
+        """按用户名/显示名检索用户，支持字段筛选。"""
+        return
+
+    @filter.command("绑定")
+    async def cmd_bind(self, event: AstrMessageEvent, handle: str | None = None):
+        """绑定 HaulMP 论坛账号（最多 3 个，首个为主账号）。"""
+        return
+
+    @filter.command("解绑")
+    async def cmd_unbind(self, event: AstrMessageEvent, arg: str | None = None):
+        """解绑 HaulMP 论坛账号（序号/用户名/全部）。"""
+        return
+
+    @filter.command("我的绑定")
+    async def cmd_my(self, event: AstrMessageEvent):
+        """查看已绑定的 HaulMP 账号列表。"""
+        return
+
+    @filter.command("服务器")
+    async def cmd_server(self, event: AstrMessageEvent):
+        """查询 HaulMP 服务器状态（在线人数/客户端版本）。"""
+        return
+
+    @filter.command("定位")
+    async def cmd_locate(self, event: AstrMessageEvent, handle: str | None = None):
+        """查询玩家实时位置（地图图片，标注附近玩家）。"""
+        return
+
+    @filter.command("路况")
+    async def cmd_traffic(self, event: AstrMessageEvent):
+        """全量在线玩家路况（地图图片 + 行驶/停靠统计）。"""
+        return
 
     async def terminate(self):
         """插件被卸载/停用时会调用，可做资源清理。"""

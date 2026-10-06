@@ -3,5 +3,15 @@
     "description": "资料查询输出格式：text（纯文本，默认）或 image（头像+文本图文卡片）",
     "type": "string",
     "default": "text"
+  },
+  "offline_tiles_dir": {
+    "description": "离线矢量瓦片根目录（含 z/x/y.pbf）。留空则使用插件自带的 offline_tiles/（已随插件打包）。如需指向机器上已有的 map 镜像，可填绝对路径。",
+    "type": "string",
+    "default": ""
+  },
+  "remote_tile_fallback": {
+    "description": "本地瓦片缺失时是否回退到 map.haulmp.com 在线瓦片补全（默认关闭，纯离线最稳，不会因网络阻塞卡住）。仅当机器人所在网络能稳定访问 haulmp.com 时才建议开启。",
+    "type": "bool",
+    "default": false
   }
 }
