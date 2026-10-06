@@ -54,7 +54,7 @@ RE_QUERY = re.compile(r"^(?:/)?查询\s*(.*)$")
 RE_BIND = re.compile(r"^(?:/)?绑定\s*(.*)$")
 RE_MY = re.compile(r"^(?:/)?我的绑定\s*$")
 RE_UNBIND = re.compile(r"^(?:/)?解绑\s*(.*)$")
-RE_SERVER = re.compile(r"^(?:/)?服务器H\s*$")
+RE_SERVER = re.compile(r"^(?:/)?服务器\s*$")
 RE_LOCATE = re.compile(r"^(?:/)?定位\s*(.*)$")
 RE_TRAFFIC = re.compile(r"^(?:/)?路况\s*$")
 
