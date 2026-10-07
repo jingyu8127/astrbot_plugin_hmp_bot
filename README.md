@@ -1,5 +1,5 @@
 # astrbot_plugin_hmp_bot
-[![version](https://img.shields.io/badge/version-v1.2.0-blue)](https://github.com/jingyu8127/astrbot_plugin_hmp_bot)
+[![version](https://img.shields.io/badge/version-v1.2.1-blue)](https://github.com/jingyu8127/astrbot_plugin_hmp_bot)
 
 
 
@@ -83,8 +83,3 @@ https://github.com/jingyu8127/astrbot_plugin_hmp_bot
 - 💡 提出新功能建议
 - 🔧 提交 Pull Request 改进代码
 
-# 支持
-
-[帮助文档](https://astrbot.app)
-
-感谢 [HaulMP](https://haulmp.com) 提供的论坛与地图接口。
