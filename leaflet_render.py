@@ -7,10 +7,10 @@
 - points: [{lon, lat, name, kind, sub}]，kind ∈ target/near/player/ghost
 - mode: "locate"（标记）/ "traffic"（热力）/ "auto"（按是否含 target 推断）
 - tile_url / tile_type: 底图瓦片。留空则使用 HaulMP 官方矢量瓦片（真实 ETS2 路网 .pbf）；
-  tile_type ∈ auto/raster/vector/none。none 时回退为合成暗色画布 + 经纬网格。
+  tile_type ∈ auto/raster/vector。底图加载失败时由调用方改用文字输出（不再出合成底图）。
 
 前置：本目录需 `npm install puppeteer`（会下载 Chromium），且系统 PATH 中有 node。
-失败时抛出 RuntimeError，由调用方处理（指令返回渲染失败提示）。
+失败时抛出 RuntimeError，由调用方（main.py）改用文字摘要输出。
 """
 
 import json

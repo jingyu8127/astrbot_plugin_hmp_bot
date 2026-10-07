@@ -690,8 +690,8 @@ class HmpBotPlugin(Star):
                 out_path=os.path.join(self.maps_dir, f"locate_{uuid.uuid4().hex}.png"),
             )
         except Exception as e:
-            logger.warning("渲染定位地图失败: %s", e)
-            return f"❌ 地图渲染失败：{e}"
+            logger.warning("渲染定位地图失败（改用文字输出）: %s", e)
+            return self._locate_text(name, lon, lat, moving, ghost, nearby)
 
         summary = (
             f"📍 {name} 实时定位：{lat:.4f}°N, {lon:.4f}°E，"
@@ -700,6 +700,21 @@ class HmpBotPlugin(Star):
             + f"，附近 60km 内 {len(nearby)} 人。"
         )
         return [Comp.Plain(summary), Comp.Image(file=out_path)]
+
+    def _locate_text(self, name, lon, lat, moving, ghost, nearby):
+        """定位渲染失败时的文字摘要替代（不输出合成底图图片）。"""
+        lines = [
+            f"📍 {name} 实时定位（文字版）",
+            f"状态：{'🚚 行驶' if moving else '🅿️ 停靠'}" + ("  ⚠️安全区" if ghost else ""),
+            f"坐标：{lat:.4f}°N, {lon:.4f}°E",
+            f"附近 60km 内：{len(nearby)} 人",
+        ]
+        if nearby:
+            lines.append("— 附近玩家 —")
+            for d, p, plon, plat in nearby[:15]:
+                spd = max(0, round(float(p.get("speed") or 0)))
+                lines.append(f"· {p.get('name')}  {d:.0f}km  {spd}km/h")
+        return "\n".join(lines)
 
     # ---------- 业务逻辑：路况 ----------
     async def _do_traffic(self) -> list | str:
@@ -747,14 +762,38 @@ class HmpBotPlugin(Star):
                 out_path=os.path.join(self.maps_dir, f"traffic_{uuid.uuid4().hex}.png"),
             )
         except Exception as e:
-            logger.warning("渲染路况地图失败: %s", e)
-            return f"❌ 地图渲染失败：{e}"
+            logger.warning("渲染路况地图失败（改用文字输出）: %s", e)
+            return self._traffic_text(players, total, moving, ghost, status)
 
         summary = (
             f"🚦 HaulMP 实时路况：在线 {total}，行驶 {moving}，"
             f"停靠 {total - moving}，安全区 {ghost}。"
         )
         return [Comp.Plain(summary), Comp.Image(file=out_path)]
+
+    def _traffic_text(self, players, total, moving, ghost, status):
+        """路况渲染失败时的文字摘要替代（不输出合成底图图片）。"""
+        lines = [
+            "🚦 HaulMP 实时路况（文字版）",
+            f"地图在线：{total}",
+            f"行驶：{moving}",
+            f"停靠：{total - moving}",
+            f"安全区：{ghost}",
+        ]
+        if status:
+            online = status.get("online")
+            lines.append(
+                f"服务器：{'🟢' if online else '🔴'}"
+                f"{status.get('players')}/{status.get('maxPlayers')}"
+            )
+        moving_list = [p for p in players if float(p.get("speed") or 0) > 0.5]
+        moving_list.sort(key=lambda p: float(p.get("speed") or 0), reverse=True)
+        if moving_list:
+            lines.append("— 行驶中（最快） —")
+            for p in moving_list[:10]:
+                spd = max(0, round(float(p.get("speed") or 0)))
+                lines.append(f"· {p.get('name')}  {spd}km/h")
+        return "\n".join(lines)
 
     # ---------- 事件监听（接收所有消息，正则路由） ----------
     @filter.event_message_type(filter.EventMessageType.ALL)

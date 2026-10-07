@@ -45,6 +45,8 @@
   </div>
   <script>
     const DEFAULT_TILE = 'https://map.haulmp.com/tiles/{z}/{x}/{y}.pbf';
+    // 底图加载状态：供渲染端判断是否改用文字输出（无底图 / 瓦片加载失败）。
+    window.__base = { ok: false, loaded: 0, errored: 0 };
 
     function niceStep(span, target) {
       const raw = span / (target || 6);
@@ -53,38 +55,32 @@
       return 360;
     }
 
-    function drawGraticule(map, b) {
-      const sw = b.getSouthWest(), ne = b.getNorthEast();
-      const step = niceStep(Math.max(ne.lng - sw.lng, ne.lat - sw.lat));
-      const opts = { color: '#2a3e60', weight: 1, opacity: 0.6, interactive: false };
-      for (let lon = Math.floor(sw.lng / step) * step; lon <= ne.lng; lon += step) {
-        L.polyline([[sw.lat, lon],[ne.lat, lon]], opts).addTo(map);
-      }
-      for (let lat = Math.floor(sw.lat / step) * step; lat <= ne.lat; lat += step) {
-        L.polyline([[lat, sw.lng],[lat, ne.lng]], opts).addTo(map);
-      }
-    }
-
     function buildBase(map, data) {
       const type = (data.tileType || 'auto').toLowerCase();
       const url = data.tileUrl || (type === 'none' ? '' : DEFAULT_TILE);
+      if (type === 'none') { window.__base.ok = false; return false; }
       if (type === 'raster' || (type === 'auto' && url && !url.endsWith('.pbf'))) {
-        L.tileLayer(url, { maxZoom: 19, crossOrigin: true }).addTo(map);
-        return true;
+        const layer = L.tileLayer(url, { maxZoom: 19, crossOrigin: true }).addTo(map);
+        layer.on('tileload', () => window.__base.loaded++);
+        layer.on('tileerror', () => window.__base.errored++);
+        window.__base.ok = true; return true;
       }
       if (type === 'vector' || (type === 'auto' && url.endsWith('.pbf'))) {
         try {
           const style = { stroke: true, color: '#7d8cb5', weight: 1.6,
                           opacity: 0.85, fill: true, fillColor: '#1a2942',
                           fillOpacity: 0.15 };
-          L.vectorGrid.protobuf(url, {
+          const layer = L.vectorGrid.protobuf(url, {
             vectorTileLayerStyles: function () { return style; },
             maxZoom: 20, rendererFactory: L.canvas.tile
           }).addTo(map);
-          return true;
-        } catch (e) { console.warn('矢量瓦片加载失败，回退合成底图:', e); }
+          layer.on('tileload', () => window.__base.loaded++);
+          layer.on('tileerror', () => window.__base.errored++);
+          window.__base.ok = true; return true;
+        } catch (e) { console.warn('矢量瓦片加载失败:', e); }
       }
-      return false;
+      window.__base.ok = false;
+      return false; // 无底图：交由渲染端改用文字输出
     }
 
     function buildHeat(map, data) {
@@ -107,7 +103,6 @@
       const pts = data.points.map(p => L.latLng(p.lat, p.lon));
       if (data.center) pts.push(L.latLng(data.center[1], data.center[0]));
       const b = L.latLngBounds(pts);
-      if (!hasBase) drawGraticule(map, b);
       map.fitBounds(b.pad(0.15));
 
       if (hasBase) {

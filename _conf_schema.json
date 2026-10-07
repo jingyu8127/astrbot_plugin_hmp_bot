@@ -5,12 +5,12 @@
     "default": "text"
   },
   "leaflet_tile_url": {
-    "description": "Leaflet 渲染底图瓦片地址模板（留空则用 HaulMP 官方矢量瓦片 map.haulmp.com/tiles/{z}/{x}/{y}.pbf 真实路网）。可填栅格底图如 https://.../{z}/{x}/{y}.png，或填 none 关闭底图仅用合成暗色画布。",
+    "description": "Leaflet 底图瓦片地址模板（留空则用 HaulMP 官方矢量瓦片 map.haulmp.com/tiles/{z}/{x}/{y}.pbf 真实路网）。可填栅格底图如 https://.../{z}/{x}/{y}.png。底图加载失败时自动改用文字输出。",
     "type": "string",
     "default": ""
   },
   "leaflet_tile_type": {
-    "description": "底图瓦片类型：auto（按后缀自动判断）/ raster（栅格 PNG）/ vector（矢量 pbf 路网）/ none（合成暗色画布 + 经纬网格）。",
+    "description": "底图瓦片类型：auto（按后缀自动判断）/ raster（栅格 PNG）/ vector（矢量 pbf 路网）。底图加载失败时自动改用文字输出，而非出合成底图。",
     "type": "string",
     "default": "auto"
   }

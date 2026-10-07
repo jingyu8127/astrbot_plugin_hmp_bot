@@ -1,12 +1,12 @@
 # astrbot_plugin_hmp_bot
-[![version](https://img.shields.io/badge/version-v1.2.3-blue)](https://github.com/jingyu8127/astrbot_plugin_hmp_bot)
+[![version](https://img.shields.io/badge/version-v1.2.4-blue)](https://github.com/jingyu8127/astrbot_plugin_hmp_bot)
 
 
 
 HaulMP（卡车模拟联机）查询机器人，用于查询玩家资料、检索用户、服务器状态、实时定位及全量路况等。
 
 > [!NOTE]
-> 「定位」「路况」为图片输出，由 **Leaflet + Puppeteer** 渲染（真实 ETS2 路网矢量瓦片底图 + 标记 / 路况热力图），需系统安装 `node` 并在插件目录执行 `npm install`（会下载 Chromium）。底图缺失时自动回退为合成暗色画布，仍可出图。
+> 「定位」「路况」为图片输出，由 **Leaflet + Puppeteer** 渲染（真实 ETS2 路网矢量瓦片底图 + 标记 / 路况热力图），需系统安装 `node` 并在插件目录执行 `npm install`（会下载 Chromium）。底图加载失败或渲染不可用时，自动改用文字摘要输出，不再出合成底图。
 
 ### 指令
 | 指令 | 功能 | 示例 |
@@ -44,7 +44,7 @@ HaulMP（卡车模拟联机）查询机器人，用于查询玩家资料、检�
 |--------|------|
 | `output` | 资料查询输出格式：`text`（纯文本，默认）或 `image`（头像 + 图文卡片） |
 | `leaflet_tile_url` | Leaflet 底图瓦片地址模板，留空使用 HaulMP 官方矢量瓦片 `map.haulmp.com/tiles/{z}/{x}/{y}.pbf` 真实路网 |
-| `leaflet_tile_type` | 底图类型：`auto` / `raster` / `vector` / `none`（none 时合成暗色画布 + 经纬网格） |
+| `leaflet_tile_type` | 底图类型：`auto` / `raster` / `vector`。底图加载失败时自动改用文字输出 |
 
 ### 接口与数据
 数据来源：
@@ -76,12 +76,14 @@ https://github.com/jingyu8127/astrbot_plugin_hmp_bot
    Chromium 会被下载到 `~/.cache/puppeteer`（约 170MB）。
 3. 可选：修改 `leaflet_tile_url` / `leaflet_tile_type`。
    - 留空：使用 HaulMP 官方矢量瓦片，显示真实 ETS2 路网。
-   - 填 `none`：关闭底图，仅用合成暗色画布 + 经纬网格（纯离线、最快）。
    - 也可填自定义栅格地址：`https://.../{z}/{x}/{y}.png`。
 
-> 若未安装 node / Chromium，`定位`、`路况` 会提示渲染失败。底图瓦片加载失败时则自动回退为合成暗色画布，仍可出图。
+> 若未安装 node / Chromium，或底图瓦片加载失败，`定位`、`路况` 自动改用文字摘要输出，不出图。
 
 ## 历史更新
+
+## 版本 v1.2.4
+- 取消合成暗色画布兜底：`定位`/`路况` 底图加载失败或未装 node/Chromium 时，自动改用文字摘要输出（要么正常出图，要么文字）
 
 ## 版本 v1.2.3
 - 移除 Pillow 本地渲染，`定位`/`路况` 完全改用 **Leaflet + Puppeteer** 渲染后端

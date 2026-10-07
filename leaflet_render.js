@@ -61,6 +61,13 @@ async function main() {
 
     const el = await page.$('#container');
     if (!el) throw new Error('#container 元素不存在');
+
+    // 底图状态：无底图或瓦片加载失败时改用文字输出，不再出合成暗色画布。
+    const base = await page.evaluate(() => window.__base || { ok: false, loaded: 0, errored: 0 });
+    if (!base.ok || (base.errored > 0 && base.loaded === 0)) {
+      throw new Error('底图加载失败，已改用文字输出');
+    }
+
     await el.screenshot({ path: outPng, type: 'png' });
     console.log('OK ' + outPng);
   } finally {
