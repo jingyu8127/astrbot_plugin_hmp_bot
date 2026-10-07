@@ -32,7 +32,10 @@ import math
 import asyncio
 import uuid
 import aiohttp
-import map_render
+try:
+    from . import map_render
+except ImportError:
+    import map_render
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
