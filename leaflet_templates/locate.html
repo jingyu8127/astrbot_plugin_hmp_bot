@@ -1,0 +1,183 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>HMP 定位</title>
+  <link href="./vendor/leaflet.min.css" rel="stylesheet">
+  <script src="./vendor/leaflet.min.js"></script>
+  <script src="./vendor/leaflet-heat.js"></script>
+  <script src="./vendor/leaflet.vectorgrid.bundled.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body, html { margin: 0; padding: 0; font-family: "Microsoft YaHei", "微软雅黑", sans-serif; }
+    #container { width: 720px; position: relative; background: #0d1424; }
+    #title {
+      height: 56px; line-height: 56px; padding: 0 16px;
+      background: #121c30; color: #e8eefc; font-size: 24px; font-weight: 700;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #map { width: 720px; height: 720px; background: #0d1424; }
+    #stats {
+      height: 80px; padding: 0 16px; display: flex; align-items: center;
+      background: #121c30; color: #a5b9dc; font-size: 18px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    /* 指北针 */
+    #compass {
+      position: absolute; top: 64px; right: 10px; width: 40px; height: 40px;
+      z-index: 1000; color: #e8eefc; font-size: 13px; text-align: center;
+      pointer-events: none; text-shadow: 0 0 3px #000;
+    }
+    #compass .arrow { font-size: 26px; line-height: 26px; color: #ff4848; }
+    /* 比例尺 */
+    #scalebar {
+      position: absolute; left: 12px; bottom: 90px; z-index: 1000;
+      color: #e8eefc; font-size: 13px; text-shadow: 0 0 3px #000; pointer-events: none;
+    }
+    #scalebar .bar { height: 4px; border: 2px solid #e8eefc; border-top: none; margin-top: 2px; }
+    /* 标记标签 */
+    .hmp-label {
+      background: rgba(8,12,22,0.82); color: #e8eefc; border-radius: 5px;
+      padding: 2px 6px; font-size: 13px; white-space: nowrap; border: 1px solid rgba(255,255,255,0.12);
+    }
+    .hmp-label.target { color: #ffe2e2; border-color: #ff4848; }
+    .hmp-label.near { color: #ffd9a3; }
+    .pin-target {
+      width: 18px; height: 18px; border-radius: 50% 50% 50% 0;
+      background: #ff4848; border: 3px solid #ffffff; transform: rotate(-45deg);
+      box-shadow: 0 0 4px rgba(0,0,0,0.6);
+    }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div id="title">标题</div>
+    <div id="map"></div>
+    <div id="stats">—</div>
+    <div id="compass"><div class="arrow">▲</div>N</div>
+    <div id="scalebar"><span class="txt"></span><div class="bar" style="width:100px"></div></div>
+  </div>
+  <script>
+    // 默认底图：HaulMP 官方矢量瓦片（真实 ETS2 路网 .pbf）。可由 data.tileUrl 覆盖。
+    const DEFAULT_TILE = 'https://map.haulmp.com/tiles/{z}/{x}/{y}.pbf';
+
+    function niceStep(span, target) {
+      const raw = span / (target || 6);
+      const cand = [0.1,0.2,0.5,1,2,5,10,15,20,30,45,60,90,180];
+      for (const m of cand) if (m >= raw) return m;
+      return 360;
+    }
+
+    // 无瓦片（合成暗色）模式下绘制经纬网格
+    function drawGraticule(map, b) {
+      const sw = b.getSouthWest(), ne = b.getNorthEast();
+      const step = niceStep(Math.max(ne.lng - sw.lng, ne.lat - sw.lat));
+      const opts = { color: '#2a3e60', weight: 1, opacity: 0.6, interactive: false };
+      for (let lon = Math.floor(sw.lng / step) * step; lon <= ne.lng; lon += step) {
+        L.polyline([[sw.lat, lon],[ne.lat, lon]], opts).addTo(map);
+      }
+      for (let lat = Math.floor(sw.lat / step) * step; lat <= ne.lat; lat += step) {
+        L.polyline([[lat, sw.lng],[lat, ne.lng]], opts).addTo(map);
+      }
+    }
+
+    function buildBase(map, data) {
+      const type = (data.tileType || 'auto').toLowerCase();
+      const url = data.tileUrl || (type === 'none' ? '' : DEFAULT_TILE);
+      if (type === 'raster' || (type === 'auto' && url && !url.endsWith('.pbf'))) {
+        L.tileLayer(url, { maxZoom: 19, crossOrigin: true }).addTo(map);
+        return true;
+      }
+      if (type === 'vector' || (type === 'auto' && url.endsWith('.pbf'))) {
+        try {
+          const style = { stroke: true, color: '#7d8cb5', weight: 1.6,
+                          opacity: 0.85, fill: true, fillColor: '#1a2942',
+                          fillOpacity: 0.15 };
+          L.vectorGrid.protobuf(url, {
+            vectorTileLayerStyles: function () { return style; },
+            maxZoom: 20, rendererFactory: L.canvas.tile
+          }).addTo(map);
+          return true;
+        } catch (e) { console.warn('矢量瓦片加载失败，回退合成底图:', e); }
+      }
+      return false; // 无底图：合成暗色 + 网格
+    }
+
+    function placeMarkers(map, data) {
+      const ll = p => L.latLng(p.lat, p.lon);
+      for (const p of data.points) {
+        const k = p.kind || 'player';
+        if (k === 'target') {
+          const icon = L.divIcon({ className: '', html: '<div class="pin-target"></div>',
+                                   iconSize: [18,18], iconAnchor: [9,18] });
+          L.marker(ll(p), { icon }).addTo(map);
+          L.marker(ll(p), { icon: L.divIcon({ className: '',
+              html: '<div class="hmp-label target">' +
+                    (p.name || '') + ' ' + (p.sub || '') + '</div>',
+              iconSize: [0,0], iconAnchor: [-6, -22] }) }).addTo(map);
+        } else if (k === 'near') {
+          L.circleMarker(ll(p), { radius: 6, color: '#141414', weight: 1,
+              fillColor: '#ffb040', fillOpacity: 1 }).addTo(map);
+          if (p.name || p.sub) {
+            L.marker(ll(p), { icon: L.divIcon({ className: '',
+                html: '<div class="hmp-label near">' + (p.name || '') + ' ' +
+                      (p.sub || '') + '</div>', iconSize: [0,0], iconAnchor: [-6,-10] }) }).addTo(map);
+          }
+        } else if (k === 'ghost') {
+          L.circleMarker(ll(p), { radius: 3, color: '#96a2b8',
+              fillColor: '#96a2b8', fillOpacity: 0.9 }).addTo(map);
+        } else {
+          L.circleMarker(ll(p), { radius: 4, color: '#5cb4ff',
+              fillColor: '#60c4ff', fillOpacity: 0.95 }).addTo(map);
+        }
+      }
+    }
+
+    function setData(data) {
+      document.getElementById('title').textContent = data.title || '';
+      document.getElementById('stats').textContent = (data.stats || []).join('    ');
+
+      const hasBase = buildBase(map, data);
+      placeMarkers(map, data);
+
+      const pts = data.points.map(p => L.latLng(p.lat, p.lon));
+      pts.push(L.latLng(data.center[1], data.center[0]));
+      const b = L.latLngBounds(pts);
+      if (!hasBase) drawGraticule(map, b);   // 合成模式补网格
+      map.fitBounds(b.pad(0.25));
+
+      // 地理模式下画比例尺
+      if (hasBase) {
+        setTimeout(function () {
+          const bb = map.getBounds();
+          const m = map.distance(bb.getNorthWest(), bb.getNorthEast());
+          const px = document.getElementById('map').clientWidth;
+          const mPerPx = m / px;
+          const target = 110;
+          let bar = 500000;
+          for (const v of [100,200,500,1000,2000,5000,10000,20000,50000,100000,200000,500000]) {
+            if (v >= target * mPerPx) { bar = v; break; }
+          }
+          const w = bar / mPerPx;
+          const txt = (bar >= 1000 ? (bar/1000) + ' km' : bar + ' m');
+          const sb = document.getElementById('scalebar');
+          sb.querySelector('.txt').textContent = txt;
+          sb.querySelector('.bar').style.width = Math.max(8, w) + 'px';
+        }, 300);
+      } else {
+        document.getElementById('scalebar').style.display = 'none';
+      }
+    }
+
+    let map;
+    window.initMap = function () {
+      map = L.map('map', {
+        attributionControl: false, zoomControl: false,
+        crs: L.CRS.EPSG3857, preferCanvas: true
+      });
+    };
+    window.setData = setData;
+    initMap();
+  </script>
+</body>
+</html>

@@ -2,3 +2,5 @@ __pycache__/
 *.pyc
 .codebuddy/
 data/
+node_modules/
+package-lock.json

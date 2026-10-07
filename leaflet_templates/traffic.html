@@ -1,0 +1,145 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>HMP 路况</title>
+  <link href="./vendor/leaflet.min.css" rel="stylesheet">
+  <script src="./vendor/leaflet.min.js"></script>
+  <script src="./vendor/leaflet-heat.js"></script>
+  <script src="./vendor/leaflet.vectorgrid.bundled.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body, html { margin: 0; padding: 0; font-family: "Microsoft YaHei", "微软雅黑", sans-serif; }
+    #container { width: 720px; position: relative; background: #0d1424; }
+    #title {
+      height: 56px; line-height: 56px; padding: 0 16px;
+      background: #121c30; color: #e8eefc; font-size: 24px; font-weight: 700;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #map { width: 720px; height: 720px; background: #0d1424; }
+    #stats {
+      height: 80px; padding: 0 16px; display: flex; align-items: center;
+      background: #121c30; color: #a5b9dc; font-size: 18px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #compass {
+      position: absolute; top: 64px; right: 10px; width: 40px; height: 40px;
+      z-index: 1000; color: #e8eefc; font-size: 13px; text-align: center;
+      pointer-events: none; text-shadow: 0 0 3px #000;
+    }
+    #compass .arrow { font-size: 26px; line-height: 26px; color: #ff4848; }
+    #scalebar {
+      position: absolute; left: 12px; bottom: 90px; z-index: 1000;
+      color: #e8eefc; font-size: 13px; text-shadow: 0 0 3px #000; pointer-events: none;
+    }
+    #scalebar .bar { height: 4px; border: 2px solid #e8eefc; border-top: none; margin-top: 2px; }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div id="title">标题</div>
+    <div id="map"></div>
+    <div id="stats">—</div>
+    <div id="compass"><div class="arrow">▲</div>N</div>
+    <div id="scalebar"><span class="txt"></span><div class="bar" style="width:100px"></div></div>
+  </div>
+  <script>
+    const DEFAULT_TILE = 'https://map.haulmp.com/tiles/{z}/{x}/{y}.pbf';
+
+    function niceStep(span, target) {
+      const raw = span / (target || 6);
+      const cand = [0.1,0.2,0.5,1,2,5,10,15,20,30,45,60,90,180];
+      for (const m of cand) if (m >= raw) return m;
+      return 360;
+    }
+
+    function drawGraticule(map, b) {
+      const sw = b.getSouthWest(), ne = b.getNorthEast();
+      const step = niceStep(Math.max(ne.lng - sw.lng, ne.lat - sw.lat));
+      const opts = { color: '#2a3e60', weight: 1, opacity: 0.6, interactive: false };
+      for (let lon = Math.floor(sw.lng / step) * step; lon <= ne.lng; lon += step) {
+        L.polyline([[sw.lat, lon],[ne.lat, lon]], opts).addTo(map);
+      }
+      for (let lat = Math.floor(sw.lat / step) * step; lat <= ne.lat; lat += step) {
+        L.polyline([[lat, sw.lng],[lat, ne.lng]], opts).addTo(map);
+      }
+    }
+
+    function buildBase(map, data) {
+      const type = (data.tileType || 'auto').toLowerCase();
+      const url = data.tileUrl || (type === 'none' ? '' : DEFAULT_TILE);
+      if (type === 'raster' || (type === 'auto' && url && !url.endsWith('.pbf'))) {
+        L.tileLayer(url, { maxZoom: 19, crossOrigin: true }).addTo(map);
+        return true;
+      }
+      if (type === 'vector' || (type === 'auto' && url.endsWith('.pbf'))) {
+        try {
+          const style = { stroke: true, color: '#7d8cb5', weight: 1.6,
+                          opacity: 0.85, fill: true, fillColor: '#1a2942',
+                          fillOpacity: 0.15 };
+          L.vectorGrid.protobuf(url, {
+            vectorTileLayerStyles: function () { return style; },
+            maxZoom: 20, rendererFactory: L.canvas.tile
+          }).addTo(map);
+          return true;
+        } catch (e) { console.warn('矢量瓦片加载失败，回退合成底图:', e); }
+      }
+      return false;
+    }
+
+    function buildHeat(map, data) {
+      const heat = data.points.map(p => [p.lat, p.lon, 1]);
+      if (!heat.length) return;
+      L.heatLayer(heat, {
+        radius: 26, blur: 18, maxZoom: 12, minOpacity: 0.35,
+        gradient: { 0.2: '#1e6fff', 0.4: '#19c3c3', 0.6: '#9be34a',
+                    0.8: '#ffb340', 1.0: '#ff3b3b' }
+      }).addTo(map);
+    }
+
+    function setData(data) {
+      document.getElementById('title').textContent = data.title || '';
+      document.getElementById('stats').textContent = (data.stats || []).join('    ');
+
+      const hasBase = buildBase(map, data);
+      buildHeat(map, data);
+
+      const pts = data.points.map(p => L.latLng(p.lat, p.lon));
+      if (data.center) pts.push(L.latLng(data.center[1], data.center[0]));
+      const b = L.latLngBounds(pts);
+      if (!hasBase) drawGraticule(map, b);
+      map.fitBounds(b.pad(0.15));
+
+      if (hasBase) {
+        setTimeout(function () {
+          const bb = map.getBounds();
+          const m = map.distance(bb.getNorthWest(), bb.getNorthEast());
+          const px = document.getElementById('map').clientWidth;
+          const mPerPx = m / px;
+          const target = 110; let bar = 500000;
+          for (const v of [100,200,500,1000,2000,5000,10000,20000,50000,100000,200000,500000]) {
+            if (v >= target * mPerPx) { bar = v; break; }
+          }
+          const w = bar / mPerPx;
+          const txt = (bar >= 1000 ? (bar/1000) + ' km' : bar + ' m');
+          const sb = document.getElementById('scalebar');
+          sb.querySelector('.txt').textContent = txt;
+          sb.querySelector('.bar').style.width = Math.max(8, w) + 'px';
+        }, 300);
+      } else {
+        document.getElementById('scalebar').style.display = 'none';
+      }
+    }
+
+    let map;
+    window.initMap = function () {
+      map = L.map('map', {
+        attributionControl: false, zoomControl: false,
+        crs: L.CRS.EPSG3857, preferCanvas: true
+      });
+    };
+    window.setData = setData;
+    initMap();
+  </script>
+</body>
+</html>

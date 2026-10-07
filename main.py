@@ -36,6 +36,10 @@ try:
     from . import map_render
 except ImportError:
     import map_render
+try:
+    from . import leaflet_render
+except ImportError:
+    import leaflet_render
 
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
@@ -612,6 +616,22 @@ class HmpBotPlugin(Star):
                 return True
         return False
 
+    # ---------- 渲染分发：按配置选择 Pillow / Leaflet 后端 ----------
+    def _render_map(self, title, center, points, *, stats=None, out_path=None, mode="auto"):
+        """定位/路况统一出口。map_renderer=leaflet 时优先用 Leaflet，失败自动回退 Pillow。"""
+        if (self.config.get("map_renderer") or "pillow").lower() == "leaflet":
+            try:
+                return leaflet_render.render_map(
+                    title, center, points, stats=stats, out_path=out_path, mode=mode,
+                    tile_url=self.config.get("leaflet_tile_url") or "",
+                    tile_type=self.config.get("leaflet_tile_type") or "auto",
+                )
+            except Exception as e:
+                logger.warning("Leaflet 渲染不可用，回退 Pillow：%s", e)
+        return map_render.render_map(
+            title, center, points, stats=stats, out_path=out_path,
+        )
+
     async def _do_locate(self, event: AstrMessageEvent, handle: str):
         handle = handle.strip().lstrip("@")
         # 场景一：未绑定且未提供用户名 —— 提示用法
@@ -676,8 +696,8 @@ class HmpBotPlugin(Star):
             stats.append("⚠️安全区")
 
         try:
-            out_path = map_render.render_map(
-                f"HaulMP 实时定位 · {name}", (lon, lat), points, stats=stats,
+            out_path = self._render_map(
+                f"HaulMP 实时定位 · {name}", (lon, lat), points, stats=stats, mode="locate",
                 out_path=os.path.join(self.maps_dir, f"locate_{uuid.uuid4().hex}.png"),
             )
         except Exception as e:
@@ -733,8 +753,8 @@ class HmpBotPlugin(Star):
             )
 
         try:
-            out_path = map_render.render_map(
-                "HaulMP 实时路况", center, points, stats=stats,
+            out_path = self._render_map(
+                "HaulMP 实时路况", center, points, stats=stats, mode="traffic",
                 out_path=os.path.join(self.maps_dir, f"traffic_{uuid.uuid4().hex}.png"),
             )
         except Exception as e:
