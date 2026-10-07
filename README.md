@@ -1,7 +1,6 @@
 # astrbot_plugin_hmp_bot
 [![version](https://img.shields.io/badge/version-v1.2.0-blue)](https://github.com/jingyu8127/astrbot_plugin_hmp_bot)
 
-![:astrbot_plugin_hmp_bot](https://count.getloli.com/@:astrbot_plugin_hmp_bot?theme=minecraft)
 
 
 HaulMP（卡车模拟联机）查询机器人，用于查询玩家资料、检索用户、服务器状态、实时定位及全量路况等。
