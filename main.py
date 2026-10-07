@@ -1,4 +1,4 @@
-"""
+﻿"""
 HMP Bot —— HaulMP 平台查询插件（基于 AstrBot）。
 
 开发要点（来自 AstrBot 官方插件开发文档）：
@@ -298,6 +298,16 @@ class HmpBotPlugin(Star):
                 pass
             await asyncio.sleep(0.5)
         shutil.rmtree(target, ignore_errors=True)
+
+    def _detect_local_proxy(self) -> str | None:
+        """探测本机常见 HTTP 代理端口，返回 http://127.0.0.1:port 或 None。"""
+        for port in (7897, 7890, 7891, 8118, 8080, 3128):
+            try:
+                with socket.create_connection(("127.0.0.1", port), timeout=0.5):
+                    return f"http://127.0.0.1:{port}"
+            except OSError:
+                continue
+        return None
 
     async def _verify_puppeteer(self, base: str, node_exe: str, node_dir: str | None = None) -> bool:
         """实测 require('puppeteer') 是否可用（排除“有目录但包没装上”的情况）。"""
