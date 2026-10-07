@@ -1,7 +1,7 @@
 name: astrbot_plugin_hmp_bot
 author: 鲸鱼
 desc: HaulMP 平台插件 —— 绑定 HaulMP 论坛账号，查询玩家资料/服务器状态，并支持实时定位（真实经纬度 + 附近玩家）与全量路况（基于 map.haulmp.com 实时接口）。
-version: 1.2.4
+version: 1.2.1
 repo: https://github.com/jingyu8127/astrbot_plugin_hmp_bot
 display_name: HMP Bot
 short_desc: HaulMP 玩家资料查询、账号绑定、实时定位与路况
