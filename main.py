@@ -690,7 +690,7 @@ class HmpBotPlugin(Star):
             + ("，处于安全区" if ghost else "")
             + f"，附近 60km 内 {len(nearby)} 人。"
         )
-        return [Comp.Plain(summary), Comp.Image(path=out_path)]
+        return [Comp.Plain(summary), Comp.Image(file=out_path)]
 
     # ---------- 业务逻辑：路况 ----------
     async def _do_traffic(self) -> list | str:
@@ -745,7 +745,7 @@ class HmpBotPlugin(Star):
             f"🚦 HaulMP 实时路况：在线 {total}，行驶 {moving}，"
             f"停靠 {total - moving}，安全区 {ghost}。"
         )
-        return [Comp.Plain(summary), Comp.Image(path=out_path)]
+        return [Comp.Plain(summary), Comp.Image(file=out_path)]
 
     # ---------- 事件监听（接收所有消息，正则路由） ----------
     @filter.event_message_type(filter.EventMessageType.ALL)
