@@ -32,6 +32,12 @@ import math
 import asyncio
 import uuid
 import aiohttp
+import sys
+import shutil
+import platform
+import zipfile
+import tempfile
+import tarfile
 try:
     from . import leaflet_render
 except ImportError:
@@ -54,6 +60,12 @@ _HEADERS = {
         "(KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36"
     )
 }
+
+# 地图渲染依赖（Leaflet + Puppeteer）自动安装相关。
+# 插件加载时若系统无 node，会下载便携版 Node 到插件目录 nodejs/，再执行 npm install。
+NODE_VERSION = "v22.11.0"
+NODE_DIST_BASE = f"https://nodejs.org/dist/{NODE_VERSION}"
+RENDER_ENV_FLAG = ".render_env_ready"  # 渲染环境已就绪标记
 
 # 「搜人」筛选字段别名 -> (会员目录字段名, 类型)。目录对象不含 company/bio/links/driving 等
 # 仅「查询」详情才有，见 _DETAIL_ONLY_FIELDS。类型：str 子串 / num 数值比较 / bool 布尔。
@@ -151,6 +163,12 @@ class HmpBotPlugin(Star):
         self.maps_dir = os.path.abspath(os.path.join(self.data_dir, "maps"))
         os.makedirs(self.maps_dir, exist_ok=True)
 
+        # 自动安装地图渲染所需的 Node 环境（后台执行，不阻塞插件启动）
+        try:
+            asyncio.ensure_future(self._ensure_render_env())
+        except RuntimeError:
+            logger.debug("当前无可运行事件循环，跳过自动安装 Node 环境。")
+
     # ---------- 绑定存储（平台用户 -> [HaulMP 账号列表]） ----------
     def _load_bindings(self) -> dict:
         try:
@@ -162,6 +180,119 @@ class HmpBotPlugin(Star):
     def _save_bindings(self, data: dict) -> None:
         with open(self.bindings_path, "w", encoding="utf-8") as f:
             json.dump(data, f, ensure_ascii=False, indent=2)
+
+    # ---------- 渲染环境自动安装（Node + Puppeteer） ----------
+    async def _ensure_render_env(self) -> None:
+        """插件加载时确保地图渲染依赖就绪，失败仅告警（定位/路况回退文字输出）：
+        - 系统 PATH 无 node 时，下载便携版 Node 到插件目录 nodejs/；
+        - node_modules/puppeteer 缺失时，在插件目录执行 npm install（会下载 Chromium）。
+        """
+        base = os.path.dirname(os.path.abspath(__file__))
+        flag = os.path.join(base, RENDER_ENV_FLAG)
+        puppeteer_dir = os.path.join(base, "node_modules", "puppeteer")
+        if os.path.exists(puppeteer_dir) and os.path.exists(flag):
+            return  # 已就绪，跳过
+
+        node_exe = shutil.which("node") or shutil.which("node.exe")
+        node_dir = None
+        if not node_exe:
+            node_exe, node_dir = await self._install_portable_node(base)
+        if not node_exe:
+            logger.warning(
+                "未检测到 Node 且自动安装失败，定位/路况将回退文字输出；"
+                "请手动安装 Node 后在该目录执行 npm install。"
+            )
+            return
+        logger.info("Node 环境就绪：%s", node_exe)
+
+        if not os.path.exists(puppeteer_dir):
+            logger.info("正在安装地图渲染依赖（npm install，首次会下载 Chromium，请稍候）...")
+            npm = "npm.cmd" if sys.platform.startswith("win") else "npm"
+            env = dict(os.environ)
+            if node_dir:
+                env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
+            try:
+                proc = await asyncio.create_subprocess_exec(
+                    npm, "install", cwd=base, env=env,
+                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                )
+                _, err = await proc.communicate()
+                if proc.returncode != 0:
+                    logger.warning("npm install 失败：%s", (err or b"").decode(errors="ignore")[-800:])
+                    return
+            except Exception as e:
+                logger.warning("npm install 执行异常：%s", e)
+                return
+
+        try:
+            open(flag, "w").close()
+        except OSError:
+            pass
+
+    async def _install_portable_node(self, base: str):
+        """下载便携版 Node 到 base/nodejs/，返回 (node_exe, node_dir)，失败返回 (None, None)。"""
+        node_dir = os.path.join(base, "nodejs")
+        if sys.platform.startswith("win"):
+            node_exe = os.path.join(node_dir, "node.exe")
+            arch = "win-x64" if platform.machine().endswith(("64", "AMD64", "x86_64")) else "win-x86"
+            url = f"{NODE_DIST_BASE}/node-{NODE_VERSION}-{arch}.zip"
+            suffix = ".zip"
+        elif sys.platform == "darwin":
+            node_exe = os.path.join(node_dir, "bin", "node")
+            arch = "darwin-arm64" if platform.machine() == "arm64" else "darwin-x64"
+            url = f"{NODE_DIST_BASE}/node-{NODE_VERSION}-{arch}.tar.gz"
+            suffix = ".tar.gz"
+        else:
+            node_exe = os.path.join(node_dir, "bin", "node")
+            arch = "linux-x64"
+            url = f"{NODE_DIST_BASE}/node-{NODE_VERSION}-{arch}.tar.xz"
+            suffix = ".tar.xz"
+
+        if os.path.exists(node_exe):
+            return node_exe, node_dir
+
+        logger.info("未检测到系统 Node，开始下载便携版 Node（%s）...", url)
+        os.makedirs(node_dir, exist_ok=True)
+        tmp = os.path.join(tempfile.gettempdir(), "hmp_node_install" + suffix)
+        ext = node_dir + "_ext"
+        try:
+            await self._download(url, tmp)
+            if os.path.isdir(ext):
+                shutil.rmtree(ext, ignore_errors=True)
+            os.makedirs(ext, exist_ok=True)
+            if suffix == ".zip":
+                with zipfile.ZipFile(tmp) as z:
+                    z.extractall(ext)
+            else:
+                with tarfile.open(tmp) as t:
+                    t.extractall(ext)
+            # 去掉压缩包内的顶层目录，把内容直接放到 node_dir
+            top = os.path.join(ext, os.listdir(ext)[0])
+            for name in os.listdir(top):
+                shutil.move(os.path.join(top, name), os.path.join(node_dir, name))
+            shutil.rmtree(ext, ignore_errors=True)
+            if os.path.exists(tmp):
+                os.remove(tmp)
+        except Exception as e:
+            logger.warning("便携版 Node 安装失败：%s", e)
+            return None, None
+
+        if not os.path.exists(node_exe):
+            return None, None
+        logger.info("便携版 Node 安装完成：%s", node_exe)
+        return node_exe, node_dir
+
+    async def _download(self, url: str, dest: str) -> None:
+        """用 aiohttp 流式下载文件（AstrBot 要求使用异步网络库）。"""
+        async with aiohttp.ClientSession() as sess:
+            async with sess.get(url) as resp:
+                resp.raise_for_status()
+                with open(dest, "wb") as f:
+                    while True:
+                        chunk = await resp.content.read(65536)
+                        if not chunk:
+                            break
+                        f.write(chunk)
 
     # ---------- 网络：查询 HaulMP 论坛玩家资料 ----------
     async def _fetch_profile(self, handle: str) -> dict | None:

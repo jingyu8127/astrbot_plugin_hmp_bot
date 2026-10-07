@@ -3,4 +3,6 @@ __pycache__/
 .codebuddy/
 data/
 node_modules/
+nodejs/
+.render_env_ready
 package-lock.json

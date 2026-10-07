@@ -2,6 +2,11 @@
 
 本文件记录 `astrbot_plugin_hmp_bot` 的版本更新历史。
 
+## v1.2.2 (2026-10-07)
+
+### 新增
+- 插件加载时自动安装地图渲染所需的 Node 环境：系统无 `node` 时自动下载便携版 Node 到插件目录 `nodejs/`，并执行 `npm install` 拉取 Puppeteer / Chromium，无需手动配置。
+
 ## v1.2.1 (2026-10-07)
 
 ### 修复
