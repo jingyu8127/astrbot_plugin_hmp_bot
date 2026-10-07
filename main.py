@@ -1,4 +1,4 @@
-﻿"""
+"""
 HMP Bot —— HaulMP 平台查询插件（基于 AstrBot）。
 
 开发要点（来自 AstrBot 官方插件开发文档）：
