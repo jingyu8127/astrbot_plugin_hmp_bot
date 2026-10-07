@@ -77,6 +77,7 @@ _SEARCH_FIELDS = {
 # 这些字段只在「查询」的详情里，目录接口没有，无法用于「搜人」筛选
 _DETAIL_ONLY_FIELDS = {"网站", "个人网站", "简介", "bio", "车队名称", "车队标签", "驾驶时长", "时长"}
 _FILTER_RE = re.compile(r"^(.+?)(>=|<=|!=|>|<|=)(.+)$")
+_TAG_RE = re.compile(r"\[[^\]]*\]")   # 剥离游戏内名称里的 [车队] 标签前缀
 _SEARCH_MAX_PAGES = 5          # 有筛选条件时最多扫描的目录页数（每页 40）
 
 # 单监听器 + 正则路由：兼容带 / 或不带 / 的写法，且能优雅地处理
@@ -211,7 +212,16 @@ class HmpBotPlugin(Star):
     def _format_profile(member: dict) -> str:
         handle = member.get("handle") or "?"
         display = member.get("displayName") or handle
-        online = "🟢 在线" if member.get("online") else "⚪ 离线"
+        # 在线状态优先反映「游戏内」是否在线（来自 map live 接口）；
+        # 拉取失败时优雅降级为论坛平台在线状态。
+        platform_online = bool(member.get("online"))
+        in_game = member.get("inGame")
+        if in_game is True:
+            online = "🟢 游戏内在线"
+        elif in_game is False:
+            online = "⚪ 游戏内离线"
+        else:
+            online = f"{'🟢 在线' if platform_online else '⚪ 离线'}（游戏内未知）"
         admin = bool(member.get("admin"))
         role = member.get("role") or "成员"
         supporter = member.get("supporter") or 0
@@ -548,12 +558,19 @@ class HmpBotPlugin(Star):
                 )
 
         # 场景二：已绑定（省略用户名）或未绑定时显式提供了用户名
-        member = await self._fetch_profile(handle)
+        member, live = await asyncio.gather(
+            self._fetch_profile(handle), self._fetch_live()
+        )
         if not member:
             return (
                 f"未找到 HaulMP 用户「{handle}」。\n"
                 f"提示：可用「搜人 {handle}」按用户名/显示名模糊检索。"
             )
+        # 游戏内在线状态：live 在线玩家列表中是否存在该玩家（按名称匹配）
+        players = (live or {}).get("players") or []
+        member["inGame"] = self._is_in_game(
+            players, member.get("handle"), member.get("displayName")
+        )
         return member  # 返回 member 字典，由监听器决定输出格式
 
     # ---------- 业务逻辑：服务器状态 ----------
@@ -571,6 +588,26 @@ class HmpBotPlugin(Star):
         if exact:
             return exact
         return next((p for p in players if h in (p.get("name") or "").lower()), None)
+
+    @staticmethod
+    def _is_in_game(players, handle, display_name):
+        """判断玩家当前是否「在游戏内」在线。
+
+        map live 接口的 players 列表即当前在游戏内的玩家（名称常带 [车队] 标签）。
+        以名称匹配：先剥离 [车队] 标签前缀，再与论坛 handle / displayName 做
+        大小写不敏感精确比较；找不到玩家（空列表）返回 None 表示状态未知。
+        """
+        if not players:
+            return None
+        h = (handle or "").strip().lower()
+        d = (display_name or "").strip().lower()
+        for p in players:
+            nm = (p.get("name") or "").strip()
+            base = _TAG_RE.sub("", nm).strip().lower()
+            low = nm.lower()
+            if base == h or base == d or low == h or low == d:
+                return True
+        return False
 
     async def _do_locate(self, event: AstrMessageEvent, handle: str):
         handle = handle.strip().lstrip("@")
