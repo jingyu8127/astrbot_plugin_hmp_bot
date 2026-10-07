@@ -1,4 +1,5 @@
-# HMP Bot
+# astrbot_plugin_hmp_bot
+
 
 > **插件标识（name）：** `astrbot_plugin_hmp_bot`
 > **显示名称（display_name）：** HMP Bot
