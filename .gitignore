@@ -4,5 +4,6 @@ __pycache__/
 data/
 node_modules/
 nodejs/
+.cache/
 .render_env_ready
 package-lock.json

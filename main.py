@@ -191,6 +191,7 @@ class HmpBotPlugin(Star):
         base = os.path.dirname(os.path.abspath(__file__))
         flag = os.path.join(base, RENDER_ENV_FLAG)
         puppeteer_dir = os.path.join(base, "node_modules", "puppeteer")
+        node_modules_dir = os.path.join(base, "node_modules")
 
         # 已有标记且依赖目录在：做轻量校验，避免误信任损坏/残缺的标记
         if os.path.exists(flag) and os.path.exists(puppeteer_dir):
@@ -219,22 +220,41 @@ class HmpBotPlugin(Star):
         logger.info("Node 环境就绪：%s", node_exe)
 
         if not os.path.exists(puppeteer_dir):
+            # 先清掉可能存在的旧/残缺 node_modules，避免 npm 在 Windows 上 rmdir 报 ENOTEMPTY
+            if os.path.isdir(node_modules_dir):
+                logger.info("检测到已有 node_modules，先清理以避免安装冲突...")
+                await self._rmrf(node_modules_dir)
+
             logger.info("正在安装地图渲染依赖（npm install，首次会下载 Chromium，请稍候）...")
             npm = "npm.cmd" if sys.platform.startswith("win") else "npm"
             env = dict(os.environ)
             if node_dir:
                 env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
-            try:
-                proc = await asyncio.create_subprocess_exec(
-                    npm, "install", cwd=base, env=env,
-                    stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
-                )
-                _, err = await proc.communicate()
-                if proc.returncode != 0:
-                    logger.warning("npm install 失败：%s", (err or b"").decode(errors="ignore")[-800:])
+            # 配置 Chromium 国内镜像与本地缓存，降低 ECONNRESET / 下载失败概率
+            env["PUPPETEER_DOWNLOAD_BASE_URL"] = "https://cdn.npmmirror.com/binaries/chrome-for-testing"
+            env["PUPPETEER_CACHE_DIR"] = os.path.join(base, ".cache", "puppeteer")
+
+            last_err = ""
+            for attempt in range(1, 4):
+                try:
+                    proc = await asyncio.create_subprocess_exec(
+                        npm, "install", "--no-audit", "--no-fund",
+                        cwd=base, env=env,
+                        stdout=asyncio.subprocess.PIPE, stderr=asyncio.subprocess.PIPE,
+                    )
+                    _, err = await proc.communicate()
+                    last_err = (err or b"").decode(errors="ignore")[-800:]
+                    if proc.returncode == 0:
+                        break
+                    logger.warning("npm install 第 %d/3 次失败：%s", attempt, last_err)
+                    if attempt < 3:
+                        await asyncio.sleep(2 ** attempt)
+                        await self._rmrf(node_modules_dir)
+                except Exception as e:
+                    logger.warning("npm install 执行异常（第 %d/3 次）：%s", attempt, e)
                     return
-            except Exception as e:
-                logger.warning("npm install 执行异常：%s", e)
+            else:
+                logger.warning("npm install 失败（已重试 3 次）：%s", last_err)
                 return
 
         # 安装后实测：puppeteer 真的能 require 才算就绪，否则清掉标记与依赖，下次加载重试
@@ -246,7 +266,7 @@ class HmpBotPlugin(Star):
             try:
                 if os.path.exists(flag):
                     os.remove(flag)
-                shutil.rmtree(os.path.join(base, "node_modules"), ignore_errors=True)
+                await self._rmrf(node_modules_dir)
             except OSError:
                 pass
             return
@@ -256,6 +276,28 @@ class HmpBotPlugin(Star):
         except OSError:
             pass
         logger.info("地图渲染环境已就绪（Node + Puppeteer 校验通过）。")
+
+    async def _rmrf(self, target: str) -> None:
+        """强制异步删除目录；Windows 下遇到 ENOTEMPTY/只读时 chmod 后重试。"""
+        if not os.path.exists(target):
+            return
+
+        def _on_error(func, path, exc_info):
+            try:
+                os.chmod(path, 0o777)
+                func(path)
+            except Exception:
+                pass
+
+        for _ in range(3):
+            try:
+                shutil.rmtree(target, ignore_errors=False, onerror=_on_error)
+                if not os.path.exists(target):
+                    return
+            except Exception:
+                pass
+            await asyncio.sleep(0.5)
+        shutil.rmtree(target, ignore_errors=True)
 
     async def _verify_puppeteer(self, base: str, node_exe: str, node_dir: str | None = None) -> bool:
         """实测 require('puppeteer') 是否可用（排除“有目录但包没装上”的情况）。"""
@@ -1106,3 +1148,4 @@ class HmpBotPlugin(Star):
     async def terminate(self):
         """插件被卸载/停用时会调用，可做资源清理。"""
         logger.info("HMP Bot 已停止。")
+
