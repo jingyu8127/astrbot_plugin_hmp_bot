@@ -34,6 +34,7 @@ import uuid
 import aiohttp
 import sys
 import shutil
+import socket
 import platform
 import zipfile
 import tempfile
@@ -233,6 +234,15 @@ class HmpBotPlugin(Star):
             # 配置 Chromium 国内镜像与本地缓存，降低 ECONNRESET / 下载失败概率
             env["PUPPETEER_DOWNLOAD_BASE_URL"] = "https://cdn.npmmirror.com/binaries/chrome-for-testing"
             env["PUPPETEER_CACHE_DIR"] = os.path.join(base, ".cache", "puppeteer")
+
+            # 若环境未配代理，自动探测本机 HTTP 代理并透传给 npm/puppeteer
+            proxy = env.get("HTTP_PROXY") or env.get("http_proxy") or env.get("HTTPS_PROXY") or env.get("https_proxy")
+            if not proxy:
+                proxy = await asyncio.get_event_loop().run_in_executor(None, self._detect_local_proxy)
+                if proxy:
+                    logger.info("检测到本机代理 %s，将用于下载 Chromium", proxy)
+                    env["HTTP_PROXY"] = proxy
+                    env["HTTPS_PROXY"] = proxy
 
             last_err = ""
             for attempt in range(1, 4):
