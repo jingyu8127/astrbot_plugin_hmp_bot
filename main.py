@@ -653,7 +653,7 @@ class HmpBotPlugin(Star):
         moving = speed > 0.5
         name = target.get("name")
 
-        # 附近 60km 内的其他玩家（用于地图标点与文案）
+        # 附近 1km 内的其他玩家（用于地图标点与文案）
         nearby = []
         for p in players:
             if p.get("id") == target.get("id"):
@@ -663,7 +663,7 @@ class HmpBotPlugin(Star):
             except Exception:
                 continue
             d = _haversine_km(lon, lat, plon, plat)
-            if d <= 60:
+            if d <= 1:
                 nearby.append((d, p, plon, plat))
         nearby.sort(key=lambda t: t[0])
 
@@ -697,7 +697,7 @@ class HmpBotPlugin(Star):
             f"📍 {name} 实时定位：{lat:.4f}°N, {lon:.4f}°E，"
             f"{'行驶中' if moving else '停靠'}"
             + ("，处于安全区" if ghost else "")
-            + f"，附近 60km 内 {len(nearby)} 人。"
+            + f"，附近 1km 内 {len(nearby)} 人。"
         )
         return [Comp.Plain(summary), Comp.Image(file=out_path)]
 
@@ -707,7 +707,7 @@ class HmpBotPlugin(Star):
             f"📍 {name} 实时定位（文字版）",
             f"状态：{'🚚 行驶' if moving else '🅿️ 停靠'}" + ("  ⚠️安全区" if ghost else ""),
             f"坐标：{lat:.4f}°N, {lon:.4f}°E",
-            f"附近 60km 内：{len(nearby)} 人",
+            f"附近 1km 内：{len(nearby)} 人",
         ]
         if nearby:
             lines.append("— 附近玩家 —")
