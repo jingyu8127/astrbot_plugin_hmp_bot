@@ -88,8 +88,3 @@ HMP Bot 是一个面向 [HaulMP](https://haulmp.com)（卡车模拟联机）玩�
 
 ---
 
-> **已知限制（汇总）**
-> - 定位 / 路况图片渲染依赖 Leaflet + Puppeteer，需在使用环境中安装 `node` 与 Chromium；不满足时自动降级为文字输出。
-> - 实时数据依赖 HaulMP 官方接口（`forum.haulmp.com` / `haulmp.com` / `map.haulmp.com`），接口变动或不可用时相关功能会降级。
-> - 资料查询 `image` 模式依赖头像 URL 可访问。
-> - 绑定数据以本地 JSON 文件存储于插件数据目录。
