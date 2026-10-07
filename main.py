@@ -33,10 +33,6 @@ import asyncio
 import uuid
 import aiohttp
 try:
-    from . import map_render
-except ImportError:
-    import map_render
-try:
     from . import leaflet_render
 except ImportError:
     import leaflet_render
@@ -616,20 +612,13 @@ class HmpBotPlugin(Star):
                 return True
         return False
 
-    # ---------- 渲染分发：按配置选择 Pillow / Leaflet 后端 ----------
+    # ---------- 渲染：Leaflet + Puppeteer ----------
     def _render_map(self, title, center, points, *, stats=None, out_path=None, mode="auto"):
-        """定位/路况统一出口。map_renderer=leaflet 时优先用 Leaflet，失败自动回退 Pillow。"""
-        if (self.config.get("map_renderer") or "pillow").lower() == "leaflet":
-            try:
-                return leaflet_render.render_map(
-                    title, center, points, stats=stats, out_path=out_path, mode=mode,
-                    tile_url=self.config.get("leaflet_tile_url") or "",
-                    tile_type=self.config.get("leaflet_tile_type") or "auto",
-                )
-            except Exception as e:
-                logger.warning("Leaflet 渲染不可用，回退 Pillow：%s", e)
-        return map_render.render_map(
-            title, center, points, stats=stats, out_path=out_path,
+        """定位/路况统一出口，使用 Leaflet + Puppeteer 渲染（真实 ETS2 路网底图 + 标记/热力）。"""
+        return leaflet_render.render_map(
+            title, center, points, stats=stats, out_path=out_path, mode=mode,
+            tile_url=self.config.get("leaflet_tile_url") or "",
+            tile_type=self.config.get("leaflet_tile_type") or "auto",
         )
 
     async def _do_locate(self, event: AstrMessageEvent, handle: str):

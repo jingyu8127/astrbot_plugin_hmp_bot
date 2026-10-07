@@ -1,13 +1,12 @@
 # astrbot_plugin_hmp_bot
-[![version](https://img.shields.io/badge/version-v1.2.2-blue)](https://github.com/jingyu8127/astrbot_plugin_hmp_bot)
+[![version](https://img.shields.io/badge/version-v1.2.3-blue)](https://github.com/jingyu8127/astrbot_plugin_hmp_bot)
 
 
 
 HaulMP（卡车模拟联机）查询机器人，用于查询玩家资料、检索用户、服务器状态、实时定位及全量路况等。
 
 > [!NOTE]
-> 「定位」「路况」为图片输出。默认使用**本地 Pillow 渲染**，纯离线无需额外依赖。
-> 若需更精美的真实 ETS2 路网底图 / 路况热力图，可在插件目录开启 **Leaflet + Puppeteer 渲染后端**（需系统安装 `node` 并执行 `npm install`），通过 `map_renderer` 配置切换。Leaflet 后端失败时会自动回退到 Pillow。
+> 「定位」「路况」为图片输出，由 **Leaflet + Puppeteer** 渲染（真实 ETS2 路网矢量瓦片底图 + 标记 / 路况热力图），需系统安装 `node` 并在插件目录执行 `npm install`（会下载 Chromium）。底图缺失时自动回退为合成暗色画布，仍可出图。
 
 ### 指令
 | 指令 | 功能 | 示例 |
@@ -44,10 +43,7 @@ HaulMP（卡车模拟联机）查询机器人，用于查询玩家资料、检�
 | 配置项 | 说明 |
 |--------|------|
 | `output` | 资料查询输出格式：`text`（纯文本，默认）或 `image`（头像 + 图文卡片） |
-| `offline_tiles_dir` | 离线矢量瓦片根目录（含 `z/x/y.pbf`）。留空使用插件自带 `offline_tiles/`，也可填绝对路径指向已有镜像 |
-| `remote_tile_fallback` | 本地瓦片缺失时是否回退 `map.haulmp.com` 在线瓦片补全（默认关闭，纯离线最稳） |
-| `map_renderer` | 地图渲染后端：`pillow`（默认）或 `leaflet`。`leaflet` 可叠加真实 ETS2 路网与路况热力图，失败自动回退 Pillow |
-| `leaflet_tile_url` | Leaflet 底图瓦片地址模板，留空使用 HaulMP 官方矢量瓦片 `map.haulmp.com/tiles/{z}/{x}/{y}.pbf` |
+| `leaflet_tile_url` | Leaflet 底图瓦片地址模板，留空使用 HaulMP 官方矢量瓦片 `map.haulmp.com/tiles/{z}/{x}/{y}.pbf` 真实路网 |
 | `leaflet_tile_type` | 底图类型：`auto` / `raster` / `vector` / `none`（none 时合成暗色画布 + 经纬网格） |
 
 ### 接口与数据
@@ -66,9 +62,9 @@ HaulMP（卡车模拟联机）查询机器人，用于查询玩家资料、检�
 https://github.com/jingyu8127/astrbot_plugin_hmp_bot
 ```
 
-### 开启 Leaflet 渲染（可选）
+### 安装地图渲染依赖（必需）
 
-默认 Pillow 已可用。若想要真实路网底图 + 路况热力图，按以下步骤启用 Leaflet 后端：
+地图渲染依赖 **Leaflet + Puppeteer**（需系统安装 `node` 并下载 Chromium）：
 
 1. 确认系统 PATH 中有 `node`（建议 v18+，本机已验证 v22）。
 2. 进入插件目录（AstrBot 安装后的 `data/plugins/astrbot_plugin_hmp_bot/` 或源码目录）：
@@ -77,15 +73,20 @@ https://github.com/jingyu8127/astrbot_plugin_hmp_bot
    # 或仅安装渲染依赖
    npm install puppeteer
    ```
-3. 在 AstrBot 配置页把 `map_renderer` 改为 `leaflet`。
-4. 可选：修改 `leaflet_tile_url` / `leaflet_tile_type`。
+   Chromium 会被下载到 `~/.cache/puppeteer`（约 170MB）。
+3. 可选：修改 `leaflet_tile_url` / `leaflet_tile_type`。
    - 留空：使用 HaulMP 官方矢量瓦片，显示真实 ETS2 路网。
    - 填 `none`：关闭底图，仅用合成暗色画布 + 经纬网格（纯离线、最快）。
    - 也可填自定义栅格地址：`https://.../{z}/{x}/{y}.png`。
 
-> 启用 Leaflet 后若渲染失败（未装 node、Chromium 下载失败等），插件会自动回退到 Pillow，不影响定位/路况使用。
+> 若未安装 node / Chromium，`定位`、`路况` 会提示渲染失败。底图瓦片加载失败时则自动回退为合成暗色画布，仍可出图。
 
 ## 历史更新
+
+## 版本 v1.2.3
+- 移除 Pillow 本地渲染，`定位`/`路况` 完全改用 **Leaflet + Puppeteer** 渲染后端
+- 删除失效配置项 `map_renderer`、`offline_tiles_dir`、`remote_tile_fallback`；移除 `requirements.txt` 中的 Pillow / mapbox-vector-tile
+- 底图缺失时自动回退为合成暗色画布，仍可出图
 
 ## 版本 v1.2.2
 - 新增 Leaflet + Puppeteer 地图渲染后端（可选），支持真实 ETS2 路网矢量瓦片底图与路况热力图

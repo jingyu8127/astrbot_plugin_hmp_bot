@@ -1,6 +1,3 @@
 # HaulMP 机器人插件依赖
-# Pillow 用于本地渲染地图图片（通常 AstrBot 环境已自带）
-Pillow>=9.0
-# mapbox-vector-tile 用于解码 HaulMP 官方矢量瓦片（真实 ETS2 路网）
-# 若未安装，插件会自动回退到合成地图（无路网）。
-mapbox-vector-tile>=1.2.0
+# 地图渲染已改为 Leaflet + Puppeteer（node 端渲染），不再需要 Python 侧的 Pillow / mapbox-vector-tile。
+# 在插件目录执行 `npm install` 以安装 puppeteer（会下载 Chromium）。

@@ -1,6 +1,6 @@
-"""Leaflet + Puppeteer 渲染后端（HaulMP 插件可选地图渲染器）。
+"""Leaflet + Puppeteer 渲染后端（HaulMP 插件地图渲染器）。
 
-与 map_render.py 保持相同的调用签名：
+渲染入口 render_map 签名：
     render_map(title, center, points, *, stats=None, out_path=None, mode="auto", tile_url="", tile_type="auto")
 
 - center: (lon, lat) 主视角中心
@@ -10,7 +10,7 @@
   tile_type ∈ auto/raster/vector/none。none 时回退为合成暗色画布 + 经纬网格。
 
 前置：本目录需 `npm install puppeteer`（会下载 Chromium），且系统 PATH 中有 node。
-失败时抛出 RuntimeError，由调用方回退到 Pillow 渲染。
+失败时抛出 RuntimeError，由调用方处理（指令返回渲染失败提示）。
 """
 
 import json

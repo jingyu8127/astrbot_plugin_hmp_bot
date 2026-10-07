@@ -2,7 +2,7 @@
   "name": "astrbot-plugin-hmp-bot-leaflet-renderer",
   "version": "1.0.0",
   "private": true,
-  "description": "Leaflet + Puppeteer 地图渲染后端（可选）。仅当 map_renderer=leaflet 时需要。",
+  "description": "Leaflet + Puppeteer 地图渲染后端（必需）。本插件地图渲染依赖此依赖。",
   "scripts": {
     "install:render": "npm install puppeteer"
   },
