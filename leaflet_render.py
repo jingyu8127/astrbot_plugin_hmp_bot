@@ -73,7 +73,7 @@ def render_map(title, center, points, *, stats=None, out_path=None,
     try:
         proc = subprocess.run(
             [node, _NODE_SCRIPT, tpl, out_path, data_path],
-            capture_output=True, text=True, timeout=90,
+            cwd=_HERE, capture_output=True, text=True, timeout=90,
         )
     finally:
         try:

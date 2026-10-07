@@ -185,13 +185,26 @@ class HmpBotPlugin(Star):
     async def _ensure_render_env(self) -> None:
         """插件加载时确保地图渲染依赖就绪，失败仅告警（定位/路况回退文字输出）：
         - 系统 PATH 无 node 时，下载便携版 Node 到插件目录 nodejs/；
-        - node_modules/puppeteer 缺失时，在插件目录执行 npm install（会下载 Chromium）。
+        - node_modules/puppeteer 缺失时，在插件目录执行 npm install（会下载 Chromium）；
+        - 安装后实测 require('puppeteer') 是否可用，避免“有标记但没真正装上”的情况。
         """
         base = os.path.dirname(os.path.abspath(__file__))
         flag = os.path.join(base, RENDER_ENV_FLAG)
         puppeteer_dir = os.path.join(base, "node_modules", "puppeteer")
-        if os.path.exists(puppeteer_dir) and os.path.exists(flag):
-            return  # 已就绪，跳过
+
+        # 已有标记且依赖目录在：做轻量校验，避免误信任损坏/残缺的标记
+        if os.path.exists(flag) and os.path.exists(puppeteer_dir):
+            node_exe = shutil.which("node") or shutil.which("node.exe")
+            node_dir = None
+            if not node_exe:
+                node_exe, node_dir = await self._install_portable_node(base)
+            if node_exe and await self._verify_puppeteer(base, node_exe, node_dir):
+                return
+            logger.warning("已有 .render_env_ready 但校验失败，将重新安装渲染依赖。")
+            try:
+                os.remove(flag)
+            except OSError:
+                pass
 
         node_exe = shutil.which("node") or shutil.which("node.exe")
         node_dir = None
@@ -224,10 +237,45 @@ class HmpBotPlugin(Star):
                 logger.warning("npm install 执行异常：%s", e)
                 return
 
+        # 安装后实测：puppeteer 真的能 require 才算就绪，否则清掉标记与依赖，下次加载重试
+        if not await self._verify_puppeteer(base, node_exe, node_dir):
+            logger.warning(
+                "npm install 看似成功但 puppeteer 仍不可用，已清理 .render_env_ready，"
+                "下次插件加载会重试安装。"
+            )
+            try:
+                if os.path.exists(flag):
+                    os.remove(flag)
+                shutil.rmtree(os.path.join(base, "node_modules"), ignore_errors=True)
+            except OSError:
+                pass
+            return
+
         try:
             open(flag, "w").close()
         except OSError:
             pass
+        logger.info("地图渲染环境已就绪（Node + Puppeteer 校验通过）。")
+
+    async def _verify_puppeteer(self, base: str, node_exe: str, node_dir: str | None = None) -> bool:
+        """实测 require('puppeteer') 是否可用（排除“有目录但包没装上”的情况）。"""
+        env = dict(os.environ)
+        if node_dir:
+            env["PATH"] = node_dir + os.pathsep + env.get("PATH", "")
+        try:
+            proc = await asyncio.create_subprocess_exec(
+                node_exe, "-e", "require('puppeteer'); process.exit(0)",
+                cwd=base, env=env,
+                stdout=asyncio.subprocess.DEVNULL, stderr=asyncio.subprocess.PIPE,
+            )
+            _, err = await proc.communicate()
+            if proc.returncode == 0:
+                return True
+            logger.warning("puppeteer 校验失败：%s", (err or b"").decode(errors="ignore")[-400:])
+            return False
+        except Exception as e:
+            logger.warning("puppeteer 校验异常：%s", e)
+            return False
 
     async def _install_portable_node(self, base: str):
         """下载便携版 Node 到 base/nodejs/，返回 (node_exe, node_dir)，失败返回 (None, None)。"""
