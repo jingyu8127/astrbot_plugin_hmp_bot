@@ -99,7 +99,8 @@
           }
           if (properties.roadType) {
             window.__roadCount = (window.__roadCount || 0) + 1;
-            return { stroke: true, color: '#a5b9dc', weight: 3, opacity: 0.95,
+            // 路网是底图：细、暗，避免压过热力色块（热力层在 heatPane，z=450）
+            return { stroke: true, color: '#6f83a8', weight: 2, opacity: 0.6,
                      lineJoin: 'round', fill: false };
           }
           if (properties.type === 'city') {
@@ -114,8 +115,7 @@
         };
           const layer = L.vectorGrid.protobuf(url, {
             vectorTileLayerStyles: { 'ets2': vStyle },
-            maxZoom: 20, minZoom: 2, rendererFactory: L.svg.tile, interactive: false,
-            pane: 'roadPane'   // 放到 heat 之上的高层 pane，避免被热力图覆盖
+            maxZoom: 20, minZoom: 2, rendererFactory: L.svg.tile, interactive: false
           }).addTo(map);
           layer.on('tileload', () => window.__base.loaded++);
           layer.on('tileerror', () => window.__base.errored++);
@@ -129,11 +129,22 @@
     function buildHeat(map, data) {
       const heat = data.points.map(p => [p.lat, p.lon, 1]);
       if (!heat.length) return;
-      L.heatLayer(heat, {
+      const layer = L.heatLayer(heat, {
         radius: 12, blur: 8, maxZoom: 12, minOpacity: 0.38,
         gradient: { 0.2: '#1e6fff', 0.4: '#19c3c3', 0.6: '#9be34a',
                     0.8: '#ffb340', 1.0: '#ff3b3b' }
       }).addTo(map);
+      // L.heatLayer 固定把画布挂在 overlayPane，在 onAdd 里才创建画布；
+      // 而首次 setView 之前地图未就绪，onAdd 会被推迟到 load 事件，
+      // 因此必须等 load 之后再搬到更高层的 heatPane，保证热力压在路网之上。
+      const moveToHeatPane = function () {
+        const pane = map.getPane('heatPane');
+        if (pane && layer._canvas && layer._canvas.parentNode !== pane) {
+          pane.appendChild(layer._canvas);
+        }
+      };
+      map.once('load', moveToHeatPane);
+      moveToHeatPane();
     }
 
     function setData(data) {
@@ -146,8 +157,9 @@
       const pts = data.points.map(p => L.latLng(p.lat, p.lon));
       if (data.center) pts.push(L.latLng(data.center[1], data.center[0]));
       const b = L.latLngBounds(pts);
-      // 限制最大缩放，避免某些边界情况下缩放过高导致路网瓦片无有效数据
-      map.fitBounds(b.pad(0.15), { maxZoom: 12 });
+      // 留边很小 + 允许小数缩放（zoomSnap:0），让地图主体尽量填满画面
+      // （整数缩放会把 4.0 附近的缩放压到 3，画面利用率只剩一半）
+      map.fitBounds(b.pad(0.04), { maxZoom: 12 });
 
       if (hasBase) {
         setTimeout(function () {
@@ -174,11 +186,12 @@
     window.initMap = function () {
       map = L.map('map', {
         attributionControl: false, zoomControl: false,
-        crs: L.CRS.EPSG3857, preferCanvas: true
+        crs: L.CRS.EPSG3857, preferCanvas: true,
+        zoomSnap: 0        // 允许小数缩放：取景可精确贴合玩家范围，不再因取整而浪费画面
       });
-      // 路网专用高 zIndex 图层：位于热力图（overlayPane, z=400）之上
-      map.createPane('roadPane');
-      map.getPane('roadPane').style.zIndex = 450;
+      // 热力专用高层 pane（z=450 > overlayPane 的 400）：热力色块压在路网之上
+      map.createPane('heatPane');
+      map.getPane('heatPane').style.zIndex = 450;
     };
     window.setData = setData;
     initMap();
