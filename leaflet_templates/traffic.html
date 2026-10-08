@@ -1,0 +1,187 @@
+<!doctype html>
+<!--
+  HMP Bot 路况地图模板 —— HaulMP 平台查询插件（基于 AstrBot）
+  Copyright (C) 2026 鲸鱼
+
+  This program is free software: you can redistribute it and/or modify
+  it under the terms of the GNU General Public License as published by
+  the Free Software Foundation, either version 3 of the License, or
+  (at your option) any later version.
+
+  This program is distributed in the hope that it will be useful,
+  but WITHOUT ANY WARRANTY; without even the implied warranty of
+  MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
+  GNU General Public License for more details.
+
+  You should have received a copy of the GNU General Public License
+  along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+  注：本目录 vendor/ 下的第三方库（Leaflet、Leaflet.heat、Leaflet.VectorGrid）
+  版权归其各自作者所有，遵循其原始许可证，不适用本项目的 GPLv3。
+-->
+<html lang="zh-CN">
+<head>
+  <meta charset="UTF-8">
+  <title>HMP 路况</title>
+  <link href="./vendor/leaflet.min.css" rel="stylesheet">
+  <script src="./vendor/leaflet.min.js"></script>
+  <script src="./vendor/leaflet-heat.js"></script>
+  <script src="./vendor/leaflet.vectorgrid.bundled.js"></script>
+  <style>
+    * { box-sizing: border-box; }
+    body, html { margin: 0; padding: 0; font-family: "Microsoft YaHei", "微软雅黑", sans-serif; }
+    #container { width: 720px; position: relative; background: #0d1424; }
+    #title {
+      height: 56px; line-height: 56px; padding: 0 16px;
+      background: #121c30; color: #e8eefc; font-size: 24px; font-weight: 700;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #map { width: 720px; height: 720px; background: #0d1424; }
+    #stats {
+      height: 80px; padding: 0 16px; display: flex; align-items: center;
+      background: #121c30; color: #a5b9dc; font-size: 18px;
+      white-space: nowrap; overflow: hidden; text-overflow: ellipsis;
+    }
+    #compass {
+      position: absolute; top: 64px; right: 10px; width: 40px; height: 40px;
+      z-index: 1000; color: #e8eefc; font-size: 13px; text-align: center;
+      pointer-events: none; text-shadow: 0 0 3px #000;
+    }
+    #compass .arrow { font-size: 26px; line-height: 26px; color: #ff4848; }
+    #scalebar {
+      position: absolute; left: 12px; bottom: 90px; z-index: 1000;
+      color: #e8eefc; font-size: 13px; text-shadow: 0 0 3px #000; pointer-events: none;
+    }
+    #scalebar .bar { height: 4px; border: 2px solid #e8eefc; border-top: none; margin-top: 2px; }
+  </style>
+</head>
+<body>
+  <div id="container">
+    <div id="title">标题</div>
+    <div id="map"></div>
+    <div id="stats">—</div>
+    <div id="compass"><div class="arrow">▲</div>N</div>
+    <div id="scalebar"><span class="txt"></span><div class="bar" style="width:100px"></div></div>
+  </div>
+  <script>
+    const DEFAULT_TILE = 'https://map.haulmp.com/tiles/{z}/{x}/{y}.pbf';
+    // 底图加载状态：供渲染端判断是否改用文字输出（无底图 / 瓦片加载失败）。
+    window.__base = { ok: false, loaded: 0, errored: 0 };
+    window.__styleCalls = 0;
+    window.__roadCount = 0;
+    window.__firstProps = null;
+
+    function niceStep(span, target) {
+      const raw = span / (target || 6);
+      const cand = [0.1,0.2,0.5,1,2,5,10,15,20,30,45,60,90,180];
+      for (const m of cand) if (m >= raw) return m;
+      return 360;
+    }
+
+    function buildBase(map, data) {
+      const type = (data.tileType || 'auto').toLowerCase();
+      const url = data.tileUrl || (type === 'none' ? '' : DEFAULT_TILE);
+      if (type === 'none') { window.__base.ok = false; return false; }
+      if (type === 'raster' || (type === 'auto' && url && !url.endsWith('.pbf'))) {
+        const layer = L.tileLayer(url, { maxZoom: 19, crossOrigin: true }).addTo(map);
+        layer.on('tileload', () => window.__base.loaded++);
+        layer.on('tileerror', () => window.__base.errored++);
+        window.__base.ok = true; return true;
+      }
+      if (type === 'vector' || (type === 'auto' && url.endsWith('.pbf'))) {
+      try {
+        // HaulMP 矢量瓦片图层名为 ets2，包含 roadType（道路线）、city（城市点）、mapArea（区域面）
+        const vStyle = function (properties, zoom) {
+          window.__styleCalls = (window.__styleCalls || 0) + 1;
+          if (!window.__firstProps && properties) {
+            window.__firstProps = { keys: Object.keys(properties), zoom: zoom,
+                                    hasRoadType: !!properties.roadType, type: properties.type };
+          }
+          if (properties.roadType) {
+            window.__roadCount = (window.__roadCount || 0) + 1;
+            return { stroke: true, color: '#a5b9dc', weight: 3, opacity: 0.95,
+                     lineJoin: 'round', fill: false };
+          }
+          if (properties.type === 'city') {
+            return { radius: 2.2, stroke: false, fill: true,
+                     fillColor: '#ffcc66', fillOpacity: 1 };
+          }
+          if (properties.type === 'mapArea') {
+            return { stroke: false, fill: true,
+                     fillColor: '#162238', fillOpacity: 0.25 };
+          }
+          return { stroke: true, color: '#7d8cb5', weight: 1, opacity: 0.6, fill: false };
+        };
+          const layer = L.vectorGrid.protobuf(url, {
+            vectorTileLayerStyles: { 'ets2': vStyle },
+            maxZoom: 20, minZoom: 2, rendererFactory: L.svg.tile, interactive: false,
+            pane: 'roadPane'   // 放到 heat 之上的高层 pane，避免被热力图覆盖
+          }).addTo(map);
+          layer.on('tileload', () => window.__base.loaded++);
+          layer.on('tileerror', () => window.__base.errored++);
+          window.__base.ok = true; return true;
+        } catch (e) { console.warn('矢量瓦片加载失败:', e); }
+      }
+      window.__base.ok = false;
+      return false; // 无底图：交由渲染端改用文字输出
+    }
+
+    function buildHeat(map, data) {
+      const heat = data.points.map(p => [p.lat, p.lon, 1]);
+      if (!heat.length) return;
+      L.heatLayer(heat, {
+        radius: 12, blur: 8, maxZoom: 12, minOpacity: 0.38,
+        gradient: { 0.2: '#1e6fff', 0.4: '#19c3c3', 0.6: '#9be34a',
+                    0.8: '#ffb340', 1.0: '#ff3b3b' }
+      }).addTo(map);
+    }
+
+    function setData(data) {
+      document.getElementById('title').textContent = data.title || '';
+      document.getElementById('stats').textContent = (data.stats || []).join('    ');
+
+      const hasBase = buildBase(map, data);
+      buildHeat(map, data);
+
+      const pts = data.points.map(p => L.latLng(p.lat, p.lon));
+      if (data.center) pts.push(L.latLng(data.center[1], data.center[0]));
+      const b = L.latLngBounds(pts);
+      // 限制最大缩放，避免某些边界情况下缩放过高导致路网瓦片无有效数据
+      map.fitBounds(b.pad(0.15), { maxZoom: 12 });
+
+      if (hasBase) {
+        setTimeout(function () {
+          const bb = map.getBounds();
+          const m = map.distance(bb.getNorthWest(), bb.getNorthEast());
+          const px = document.getElementById('map').clientWidth;
+          const mPerPx = m / px;
+          const target = 110; let bar = 500000;
+          for (const v of [100,200,500,1000,2000,5000,10000,20000,50000,100000,200000,500000]) {
+            if (v >= target * mPerPx) { bar = v; break; }
+          }
+          const w = bar / mPerPx;
+          const txt = (bar >= 1000 ? (bar/1000) + ' km' : bar + ' m');
+          const sb = document.getElementById('scalebar');
+          sb.querySelector('.txt').textContent = txt;
+          sb.querySelector('.bar').style.width = Math.max(8, w) + 'px';
+        }, 300);
+      } else {
+        document.getElementById('scalebar').style.display = 'none';
+      }
+    }
+
+    let map;
+    window.initMap = function () {
+      map = L.map('map', {
+        attributionControl: false, zoomControl: false,
+        crs: L.CRS.EPSG3857, preferCanvas: true
+      });
+      // 路网专用高 zIndex 图层：位于热力图（overlayPane, z=400）之上
+      map.createPane('roadPane');
+      map.getPane('roadPane').style.zIndex = 450;
+    };
+    window.setData = setData;
+    initMap();
+  </script>
+</body>
+</html>
