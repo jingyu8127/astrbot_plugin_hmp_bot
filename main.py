@@ -1,24 +1,26 @@
-
-import os
-import re
+import asyncio
 import json
 import math
-import asyncio
+import os
+import re
 import uuid
+
 import aiohttp
+import astrbot.api.message_components as Comp
 from astrbot.api import AstrBotConfig, logger
 from astrbot.api.event import AstrMessageEvent, filter
 from astrbot.api.star import Context, Star
-import astrbot.api.message_components as Comp
 
 # 地图渲染统一使用 AstrBot 内置的 t2i 服务（html_renderer），不再自带 Node/Chromium。
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _TPL_DIR = os.path.join(_HERE, "leaflet_templates")
 _VENDOR_DIR = os.path.join(_TPL_DIR, "vendor")
 
+
 def _read_vendor(rel: str) -> str:
-    with open(os.path.join(_VENDOR_DIR, rel), "r", encoding="utf-8") as _f:
+    with open(os.path.join(_VENDOR_DIR, rel), encoding="utf-8") as _f:
         return _f.read()
+
 
 FORUM_API = "https://forum.haulmp.com/api/forum"
 STATUS_URL = "https://haulmp.com/api/status"
@@ -37,19 +39,31 @@ _HEADERS = {
 # 「搜人」筛选字段别名 -> (会员目录字段名, 类型)。目录对象不含 company/bio/links/driving 等
 # 仅「查询」详情才有，见 _DETAIL_ONLY_FIELDS。类型：str 子串 / num 数值比较 / bool 布尔。
 _SEARCH_FIELDS = {
-    "用户名": ("handle", "str"), "名字": ("handle", "str"), "name": ("handle", "str"),
-    "显示名": ("displayName", "str"), "显示名称": ("displayName", "str"),
-    "用户id": ("id", "str"), "id": ("id", "str"),
+    "用户名": ("handle", "str"),
+    "名字": ("handle", "str"),
+    "name": ("handle", "str"),
+    "显示名": ("displayName", "str"),
+    "显示名称": ("displayName", "str"),
+    "用户id": ("id", "str"),
+    "id": ("id", "str"),
     "角色": ("role", "str"),
-    "管理员": ("admin", "bool"), "admin": ("admin", "bool"),
-    "支持者": ("supporter", "num"), "支持者等级": ("supporter", "num"),
-    "在线": ("online", "bool"), "在线状态": ("online", "bool"),
-    "车队成员": ("vtcMember", "bool"), "vtc成员": ("vtcMember", "bool"),
-    "里程": ("km", "num"), "总里程": ("km", "num"), "驾驶里程": ("km", "num"),
-    "交付": ("deliveries", "num"), "交付次数": ("deliveries", "num"),
+    "管理员": ("admin", "bool"),
+    "admin": ("admin", "bool"),
+    "支持者": ("supporter", "num"),
+    "支持者等级": ("supporter", "num"),
+    "在线": ("online", "bool"),
+    "在线状态": ("online", "bool"),
+    "车队成员": ("vtcMember", "bool"),
+    "vtc成员": ("vtcMember", "bool"),
+    "里程": ("km", "num"),
+    "总里程": ("km", "num"),
+    "驾驶里程": ("km", "num"),
+    "交付": ("deliveries", "num"),
+    "交付次数": ("deliveries", "num"),
     "最长单程": ("longestKm", "num"),
     "活跃天数": ("activeDays", "num"),
-    "帖子": ("posts", "num"), "帖子数": ("posts", "num"),
+    "帖子": ("posts", "num"),
+    "帖子数": ("posts", "num"),
     "声望": ("reputation", "num"),
     "国家": ("country", "str"),
     "签名": ("signature", "str"),
@@ -57,10 +71,19 @@ _SEARCH_FIELDS = {
     "最后活跃": ("lastActive", "str"),
 }
 # 这些字段只在「查询」的详情里，目录接口没有，无法用于「搜人」筛选
-_DETAIL_ONLY_FIELDS = {"网站", "个人网站", "简介", "bio", "车队名称", "车队标签", "驾驶时长", "时长"}
+_DETAIL_ONLY_FIELDS = {
+    "网站",
+    "个人网站",
+    "简介",
+    "bio",
+    "车队名称",
+    "车队标签",
+    "驾驶时长",
+    "时长",
+}
 _FILTER_RE = re.compile(r"^(.+?)(>=|<=|!=|>|<|=)(.+)$")
-_TAG_RE = re.compile(r"\[[^\]]*\]")   # 剥离游戏内名称里的 [车队] 标签前缀
-_SEARCH_MAX_PAGES = 5          # 有筛选条件时最多扫描的目录页数（每页 40）
+_TAG_RE = re.compile(r"\[[^\]]*\]")  # 剥离游戏内名称里的 [车队] 标签前缀
+_SEARCH_MAX_PAGES = 5  # 有筛选条件时最多扫描的目录页数（每页 40）
 
 # 单监听器 + 正则路由：兼容带 / 或不带 / 的写法，且能优雅地处理
 # “查询”（无参数）与“查询 xxx”（带参数）等情况。
@@ -87,7 +110,8 @@ _LAM0 = math.radians(15)
 def _lcc_inverse(X, Y):
     """LCC（球面）逆投影：投影坐标(米) -> (lon, lat) 度。"""
     n = math.log(math.cos(_PHI1) / math.cos(_PHI2)) / math.log(
-        math.tan(math.pi / 4 + _PHI2 / 2) / math.tan(math.pi / 4 + _PHI1 / 2))
+        math.tan(math.pi / 4 + _PHI2 / 2) / math.tan(math.pi / 4 + _PHI1 / 2)
+    )
     F = math.cos(_PHI1) * (math.tan(math.pi / 4 + _PHI1 / 2) ** n) / n
     rho0 = _R * F / (math.tan(math.pi / 4 + _PHI0 / 2) ** n)
     rho = math.sqrt(X * X + (rho0 - Y) ** 2)
@@ -121,6 +145,12 @@ def _haversine_km(lon1, lat1, lon2, lat2):
     return r * 2 * math.atan2(math.sqrt(a), math.sqrt(1 - a))
 
 
+def _write_bytes(path: str, data: bytes) -> None:
+    """把图片字节写入磁盘；供 asyncio.to_thread 调用，避免阻塞事件循环。"""
+    with open(path, "wb") as f:
+        f.write(data)
+
+
 class HmpBotPlugin(Star):
     def __init__(self, context: Context, config: AstrBotConfig):
         super().__init__(context)
@@ -134,11 +164,10 @@ class HmpBotPlugin(Star):
         self.maps_dir = os.path.abspath(os.path.join(self.data_dir, "maps"))
         os.makedirs(self.maps_dir, exist_ok=True)
 
-
     # ---------- 绑定存储（平台用户 -> [HaulMP 账号列表]） ----------
     def _load_bindings(self) -> dict:
         try:
-            with open(self.bindings_path, "r", encoding="utf-8") as f:
+            with open(self.bindings_path, encoding="utf-8") as f:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return {}
@@ -152,13 +181,15 @@ class HmpBotPlugin(Star):
         """返回 member 字段；查不到 / 出错返回 None。"""
         url = f"{FORUM_API}/u/{handle}"
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(
                     url, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=10)
-                ) as resp:
-                    if resp.status != 200:
-                        return None
-                    data = await resp.json()
+                ) as resp,
+            ):
+                if resp.status != 200:
+                    return None
+                data = await resp.json()
             if isinstance(data, dict) and data.get("error"):
                 return None
             return data.get("member")
@@ -169,13 +200,17 @@ class HmpBotPlugin(Star):
     # ---------- 网络：查询 HaulMP 服务器状态 ----------
     async def _fetch_status(self) -> dict | None:
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    STATUS_URL, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=10)
-                ) as resp:
-                    if resp.status != 200:
-                        return None
-                    return await resp.json()
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(
+                    STATUS_URL,
+                    headers=_HEADERS,
+                    timeout=aiohttp.ClientTimeout(total=10),
+                ) as resp,
+            ):
+                if resp.status != 200:
+                    return None
+                return await resp.json()
         except Exception as e:
             logger.warning("查询 HaulMP 服务器状态失败: %s", e)
             return None
@@ -183,13 +218,15 @@ class HmpBotPlugin(Star):
     # ---------- 网络：查询 HaulMP 实时地图 ----------
     async def _fetch_live(self) -> dict | None:
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(
                     LIVE_URL, headers=_HEADERS, timeout=aiohttp.ClientTimeout(total=10)
-                ) as resp:
-                    if resp.status != 200:
-                        return None
-                    return await resp.json()
+                ) as resp,
+            ):
+                if resp.status != 200:
+                    return None
+                return await resp.json()
         except Exception as e:
             logger.warning("查询 HaulMP 实时地图失败: %s", e)
             return None
@@ -337,14 +374,18 @@ class HmpBotPlugin(Star):
         if keyword:
             params.append(("q", keyword))
         try:
-            async with aiohttp.ClientSession() as session:
-                async with session.get(
-                    f"{FORUM_API}/members", headers=_HEADERS, params=params,
+            async with (
+                aiohttp.ClientSession() as session,
+                session.get(
+                    f"{FORUM_API}/members",
+                    headers=_HEADERS,
+                    params=params,
                     timeout=aiohttp.ClientTimeout(total=10),
-                ) as resp:
-                    if resp.status != 200:
-                        return None
-                    return await resp.json()
+                ) as resp,
+            ):
+                if resp.status != 200:
+                    return None
+                return await resp.json()
         except Exception as e:
             logger.warning("检索 HaulMP 会员失败 q=%s: %s", keyword, e)
             return None
@@ -447,10 +488,7 @@ class HmpBotPlugin(Star):
         lst = bindings.get(sender, [])
         norm = member.get("handle", "").lower()
         if any(b["handle"].lower() == norm for b in lst):
-            return (
-                f"你已绑定过 HaulMP 账号「{member.get('handle')}」，"
-                f"无需重复绑定。"
-            )
+            return f"你已绑定过 HaulMP 账号「{member.get('handle')}」，无需重复绑定。"
         if len(lst) >= MAX_BINDINGS:
             return f"每个账号最多绑定 {MAX_BINDINGS} 个 HaulMP 账号。"
 
@@ -509,8 +547,7 @@ class HmpBotPlugin(Star):
                 bindings[sender] = lst
                 self._save_bindings(bindings)
                 return (
-                    f"✅ 已解绑：{removed['handle']}（"
-                    f"{removed['display_name'] or ''}）"
+                    f"✅ 已解绑：{removed['handle']}（{removed['display_name'] or ''}）"
                 )
             return f"序号 {target} 不存在，当前共 {len(lst)} 个绑定。"
 
@@ -522,8 +559,7 @@ class HmpBotPlugin(Star):
                 bindings[sender] = lst
                 self._save_bindings(bindings)
                 return (
-                    f"✅ 已解绑：{removed['handle']}（"
-                    f"{removed['display_name'] or ''}）"
+                    f"✅ 已解绑：{removed['handle']}（{removed['display_name'] or ''}）"
                 )
         return f"未找到绑定「{target}」。先用「我的绑定」查看序号与用户名。"
 
@@ -592,12 +628,14 @@ class HmpBotPlugin(Star):
             nm = (p.get("name") or "").strip()
             base = _TAG_RE.sub("", nm).strip().lower()
             low = nm.lower()
-            if base == h or base == d or low == h or low == d:
+            if base in (h, d) or low in (h, d):
                 return True
         return False
 
     # ---------- 渲染：AstrBot 内置 t2i 服务（html_renderer） ----------
-    async def _render_map(self, title, center, points, *, stats=None, out_path=None, mode="auto"):
+    async def _render_map(
+        self, title, center, points, *, stats=None, out_path=None, mode="auto"
+    ):
         """定位/路况统一出口：渲染地图图片。
 
         若插件配置了 t2i_endpoint，直接 POST 到该端点（如本地 t2i_server.py），
@@ -605,7 +643,11 @@ class HmpBotPlugin(Star):
         若均未启用或渲染失败，调用方会回退到文字摘要输出。
         """
         if mode == "auto":
-            mode = "locate" if any((p.get("kind") or "") == "target" for p in points) else "traffic"
+            mode = (
+                "locate"
+                if any((p.get("kind") or "") == "target" for p in points)
+                else "traffic"
+            )
         tpl_name = "locate.html" if mode == "locate" else "traffic.html"
         tpl_path = os.path.join(_TPL_DIR, tpl_name)
         data = {
@@ -613,8 +655,10 @@ class HmpBotPlugin(Star):
             "center": [center[0], center[1]],
             "points": [
                 {
-                    "lon": float(p["lon"]), "lat": float(p["lat"]),
-                    "name": p.get("name") or "", "kind": p.get("kind", "player"),
+                    "lon": float(p["lon"]),
+                    "lat": float(p["lat"]),
+                    "name": p.get("name") or "",
+                    "kind": p.get("kind", "player"),
                     "sub": p.get("sub") or "",
                 }
                 for p in points
@@ -629,28 +673,40 @@ class HmpBotPlugin(Star):
         # 优先使用用户配置的本地/自定义 t2i 端点，不依赖 AstrBot 是否启用 html_renderer
         if endpoint:
             url = endpoint.rstrip("/") + "/generate"
-            async with aiohttp.ClientSession() as s:
-                async with s.post(
+            async with (
+                aiohttp.ClientSession() as s,
+                s.post(
                     url,
-                    json={"html": html, "type": "jpeg", "quality": 90,
-                          "width": 720, "height": 720, "full_page": True},
+                    json={
+                        "html": html,
+                        "type": "jpeg",
+                        "quality": 90,
+                        "width": 720,
+                        "height": 720,
+                        "full_page": True,
+                    },
                     timeout=aiohttp.ClientTimeout(total=45),
-                ) as r:
-                    r.raise_for_status()
-                    img = await r.read()
+                ) as r,
+            ):
+                r.raise_for_status()
+                img = await r.read()
             if not out_path:
                 out_path = os.path.join(self.maps_dir, f"{mode}_{uuid.uuid4().hex}.png")
             os.makedirs(os.path.dirname(out_path), exist_ok=True)
-            with open(out_path, "wb") as f:
-                f.write(img)
+            # 写盘放到线程里执行，避免阻塞事件循环
+            await asyncio.to_thread(_write_bytes, out_path, img)
             return out_path
 
         renderer = getattr(self.context, "html_renderer", None)
         if renderer is None:
-            raise RuntimeError("AstrBot 未提供 html_renderer（请确认已启用 t2i 服务，或在插件配置 t2i_endpoint 指向本地 t2i_server.py）")
+            raise RuntimeError(
+                "AstrBot 未提供 html_renderer（请确认已启用 t2i 服务，或在插件配置 t2i_endpoint 指向本地 t2i_server.py）"
+            )
         # return_url=False -> 返回本地图片路径，可直接用 Comp.Image(file=...) 发送
         return await renderer.render_custom_template(
-            html, {}, return_url=False,
+            html,
+            {},
+            return_url=False,
             options={"full_page": True, "type": "jpeg", "quality": 90},
         )
 
@@ -658,29 +714,47 @@ class HmpBotPlugin(Star):
         """读取本地 HTML 模板，内联 Leaflet 等前端资源（使模板对渲染端自包含），
         并以 {% raw %} 包裹避免 t2i 端 Jinja2 误解析脚本中的 {{ / {%。
         """
-        with open(tpl_path, "r", encoding="utf-8") as f:
+        with open(tpl_path, encoding="utf-8") as f:
             html = f.read()
         css = _read_vendor("leaflet.min.css")
         js_leaflet = _read_vendor("leaflet.min.js")
         js_heat = _read_vendor("leaflet-heat.js")
         js_vg = _read_vendor("leaflet.vectorgrid.bundled.js")
         html = (
-            html
-            .replace('<link href="./vendor/leaflet.min.css" rel="stylesheet">', "<style>" + css + "</style>")
-            .replace('<script src="./vendor/leaflet.min.js"></script>', "<script>" + js_leaflet + "</script>")
-            .replace('<script src="./vendor/leaflet-heat.js"></script>', "<script>" + js_heat + "</script>")
-            .replace('<script src="./vendor/leaflet.vectorgrid.bundled.js"></script>', "<script>" + js_vg + "</script>")
+            html.replace(
+                '<link href="./vendor/leaflet.min.css" rel="stylesheet">',
+                "<style>" + css + "</style>",
+            )
+            .replace(
+                '<script src="./vendor/leaflet.min.js"></script>',
+                "<script>" + js_leaflet + "</script>",
+            )
+            .replace(
+                '<script src="./vendor/leaflet-heat.js"></script>',
+                "<script>" + js_heat + "</script>",
+            )
+            .replace(
+                '<script src="./vendor/leaflet.vectorgrid.bundled.js"></script>',
+                "<script>" + js_vg + "</script>",
+            )
         )
         # 跳过 shiki 运行时注入（约 1.2MB），避免无谓膨胀
         hi = html.rindex("</head>")
-        html = html[:hi] + '<script id="astrbot-t2i-shiki-runtime"></script>' + html[hi:]
+        html = (
+            html[:hi] + '<script id="astrbot-t2i-shiki-runtime"></script>' + html[hi:]
+        )
         # 在 </body> 前注入数据并调用模板内已定义的 setData()
-        data_json = json.dumps(data, ensure_ascii=False).replace("</", "<\/")
+        data_json = json.dumps(data, ensure_ascii=False).replace("</", r"<\/")
         bi = html.rindex("</body>")
-        html = html[:bi] + '<script>try{setData(' + data_json + ');}catch(e){console.error(e);}</script>' + html[bi:]
+        html = (
+            html[:bi]
+            + "<script>try{setData("
+            + data_json
+            + ");}catch(e){console.error(e);}</script>"
+            + html[bi:]
+        )
         # 整体以 {% raw %} 包裹，避免 t2i 端 Jinja2 把 JS 里的 {{ / {% 当作语法
         return "{% raw %}" + html + "{% endraw %}"
-
 
     async def _do_locate(self, event: AstrMessageEvent, handle: str):
         handle = handle.strip().lstrip("@")
@@ -706,7 +780,9 @@ class HmpBotPlugin(Star):
         if not target:
             return f"未找到玩家：{handle}"
         try:
-            lon, lat = game_to_lonlat(float(target.get("x") or 0), float(target.get("z") or 0))
+            lon, lat = game_to_lonlat(
+                float(target.get("x") or 0), float(target.get("z") or 0)
+            )
         except Exception:
             return f"玩家「{target.get('name')}」坐标异常，无法定位。"
         speed = float(target.get("speed") or 0)
@@ -720,23 +796,36 @@ class HmpBotPlugin(Star):
             if p.get("id") == target.get("id"):
                 continue
             try:
-                plon, plat = game_to_lonlat(float(p.get("x") or 0), float(p.get("z") or 0))
-            except Exception:
+                plon, plat = game_to_lonlat(
+                    float(p.get("x") or 0), float(p.get("z") or 0)
+                )
+            except Exception as e:  # 坐标异常：跳过该玩家，不影响其余结果
+                logger.debug("定位：跳过坐标异常的玩家 %s: %s", p.get("name"), e)
                 continue
             d = _haversine_km(lon, lat, plon, plat)
             if d <= _LOCATE_NEARBY_KM:
                 nearby.append((d, p, plon, plat))
         nearby.sort(key=lambda t: t[0])
 
-        points = [{
-            "lon": lon, "lat": lat, "name": name, "kind": "target",
-            "sub": f"{lat:.4f}°N,{lon:.4f}°E  {max(0, round(speed))}km/h",
-        }]
+        points = [
+            {
+                "lon": lon,
+                "lat": lat,
+                "name": name,
+                "kind": "target",
+                "sub": f"{lat:.4f}°N,{lon:.4f}°E  {max(0, round(speed))}km/h",
+            }
+        ]
         for d, p, plon, plat in nearby[:15]:
-            points.append({
-                "lon": plon, "lat": plat, "name": p.get("name"),
-                "kind": "near", "sub": f"{d:.0f}km",
-            })
+            points.append(
+                {
+                    "lon": plon,
+                    "lat": plat,
+                    "name": p.get("name"),
+                    "kind": "near",
+                    "sub": f"{d:.0f}km",
+                }
+            )
 
         stats = [
             f"状态：{'🚚行驶' if moving else '🅿️停靠'}",
@@ -747,7 +836,11 @@ class HmpBotPlugin(Star):
 
         try:
             out_path = await self._render_map(
-                f"HaulMP 实时定位 · {name}", (lon, lat), points, stats=stats, mode="locate",
+                f"HaulMP 实时定位 · {name}",
+                (lon, lat),
+                points,
+                stats=stats,
+                mode="locate",
                 out_path=os.path.join(self.maps_dir, f"locate_{uuid.uuid4().hex}.png"),
             )
         except Exception as e:
@@ -766,7 +859,8 @@ class HmpBotPlugin(Star):
         """定位渲染失败时的文字摘要替代（不输出合成底图图片）。"""
         lines = [
             f"📍 {name} 实时定位（文字版）",
-            f"状态：{'🚚 行驶' if moving else '🅿️ 停靠'}" + ("  ⚠️安全区" if ghost else ""),
+            f"状态：{'🚚 行驶' if moving else '🅿️ 停靠'}"
+            + ("  ⚠️安全区" if ghost else ""),
             f"坐标：{lat:.4f}°N, {lon:.4f}°E",
             f"附近 {_LOCATE_NEARBY_KM:.0f}km 内：{len(nearby)} 人",
         ]
@@ -793,13 +887,20 @@ class HmpBotPlugin(Star):
         slon = slat = 0.0
         for p in players:
             try:
-                lon, lat = game_to_lonlat(float(p.get("x") or 0), float(p.get("z") or 0))
-            except Exception:
+                lon, lat = game_to_lonlat(
+                    float(p.get("x") or 0), float(p.get("z") or 0)
+                )
+            except Exception as e:  # 坐标异常：跳过该玩家，统计不受影响
+                logger.debug("路况：跳过坐标异常的玩家 %s: %s", p.get("name"), e)
                 continue
-            points.append({
-                "lon": lon, "lat": lat, "name": p.get("name"),
-                "kind": "ghost" if p.get("ghost") else "player",
-            })
+            points.append(
+                {
+                    "lon": lon,
+                    "lat": lat,
+                    "name": p.get("name"),
+                    "kind": "ghost" if p.get("ghost") else "player",
+                }
+            )
             slon += lon
             slat += lat
         center = (slon / len(points), slat / len(points))
@@ -819,7 +920,11 @@ class HmpBotPlugin(Star):
 
         try:
             out_path = await self._render_map(
-                "HaulMP 实时路况", center, points, stats=stats, mode="traffic",
+                "HaulMP 实时路况",
+                center,
+                points,
+                stats=stats,
+                mode="traffic",
                 out_path=os.path.join(self.maps_dir, f"traffic_{uuid.uuid4().hex}.png"),
             )
         except Exception as e:
@@ -988,5 +1093,6 @@ class HmpBotPlugin(Star):
     async def terminate(self):
         """插件被卸载/停用时会调用，可做资源清理。"""
         logger.info("HMP Bot 已停止。")
+
 
 # 文件用途：插件主程序 —— AstrBot 指令注册与路由、HaulMP 接口调用、资料 / 定位 / 路况出图调度
