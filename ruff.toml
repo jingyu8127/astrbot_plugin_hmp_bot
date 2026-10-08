@@ -1,0 +1,20 @@
+# ruff 配置 —— 与 AstrBot 插件开发原则保持一致
+#
+# 规则取舍说明：
+# - 忽略 BLE001（blind-except）：网络 / 渲染 / 文件等边界处的兜底 `except Exception`
+#   是有意为之，对应开发原则「良好的错误处理机制，不要让插件因一个错误而崩溃」。
+# - 其余告警保持开启，提交前请执行：
+#       ruff format . && ruff check .
+line-length = 88
+target-version = "py310"
+
+[lint]
+# 默认规则（E4 / E7 / E9 / F）+ 导入排序、简化写法、现代语法、异步、安全、性能
+select = ["E4", "E7", "E9", "F", "I", "SIM", "UP", "ASYNC", "BLE", "S", "PERF"]
+ignore = ["BLE001"]
+
+[format]
+quote-style = "double"
+indent-style = "space"
+
+# 文件用途：ruff 格式化与检查规则配置 —— 约束 Python 代码风格，提交前统一跑一遍
