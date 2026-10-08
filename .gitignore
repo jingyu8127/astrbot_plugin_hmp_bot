@@ -1,0 +1,10 @@
+__pycache__/
+*.pyc
+.codebuddy/
+data/
+node_modules/
+nodejs/
+.cache/
+.render_env_ready
+package-lock.json
+# 文件用途：Git 忽略规则 —— 排除构建产物、运行时数据与本地调试文件（__pycache__ / node_modules / data / .codebuddy）
