@@ -1,0 +1,24 @@
+{
+  "output": {
+    "description": "资料查询输出格式：text（纯文本，默认）或 image（头像+文本图文卡片）",
+    "type": "string",
+    "default": "text"
+  },
+  "leaflet_tile_url": {
+    "description": "Leaflet 底图瓦片地址模板（留空则用 HaulMP 官方矢量瓦片 map.haulmp.com/tiles/{z}/{x}/{y}.pbf 真实路网）。可填栅格底图如 https://.../{z}/{x}/{y}.png。底图加载失败时自动改用文字输出。",
+    "type": "string",
+    "default": ""
+  },
+  "leaflet_tile_type": {
+    "description": "底图瓦片类型：auto（按后缀自动判断）/ raster（栅格 PNG）/ vector（矢量 pbf 路网）。底图加载失败时自动改用文字输出，而非出合成底图。",
+    "type": "string",
+    "default": "auto"
+  },
+  "t2i_endpoint": {
+    "type": "string",
+    "default": "",
+    "name": "t2i 渲染端点",
+    "desc": "自定义 t2i 渲染服务地址（留空则用 AstrBot 默认/内置 t2i）。【为什么建议自托管】AstrBot 默认远程端点截图过早，且 HaulMP 矢量瓦片(map.haulmp.com/tiles/{z}/{x}/{y}.pbf)未配置 CORS，远程沙箱里加载失败，导致地图只有热力图/标记而看不到路网。本仓库附带的 t2i_server.py 会绕过 CORS 并在截图前等待瓦片加载完成，使路况/定位的真实路网正常显示。【优势】配置此项后插件会直接 POST 到该端点，不再依赖 AstrBot 是否启用 t2i 服务；只有留空时才需要 AstrBot 自带 html_renderer。【启动步骤】1) 在 AstrBot 所在 Python 环境执行 pip install aiohttp playwright；2) playwright install chromium（仅首次，下载约150MB）；3) 在本机运行 python t2i_server.py（默认监听 http://127.0.0.1:8787，可用环境变量 T2I_PORT 改端口）；4) 在此填入 http://127.0.0.1:8787 即可。注意该服务需运行在能访问 map.haulmp.com 的机器（即部署 AstrBot 的本机）。"
+  }
+}
+
