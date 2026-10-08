@@ -142,6 +142,13 @@
       return false; // 无底图：交由渲染端改用文字输出
     }
 
+    // HTML 转义：玩家名 / 副标题来自接口数据，拼进 divIcon 的 HTML 前必须转义，
+    // 避免用户名里带 < > 等字符造成标记注入（mXSS）
+    function esc(s) {
+      const map = { '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' };
+      return String(s == null ? '' : s).replace(/[&<>"']/g, c => map[c]);
+    }
+
     function placeMarkers(map, data) {
       const ll = p => L.latLng(p.lat, p.lon);
       for (const p of data.points) {
@@ -151,16 +158,16 @@
                                    iconSize: [18,18], iconAnchor: [9,18] });
           L.marker(ll(p), { icon }).addTo(map);
           L.marker(ll(p), { icon: L.divIcon({ className: '',
-              html: '<div class="hmp-label target">' +
-                    (p.name || '') + ' ' + (p.sub || '') + '</div>',
+              html: '<div class="hmp-label target">' + esc(p.name) + ' ' +
+                    esc(p.sub) + '</div>',
               iconSize: [0,0], iconAnchor: [-6, -22] }) }).addTo(map);
         } else if (k === 'near') {
           L.circleMarker(ll(p), { radius: 6, color: '#141414', weight: 1,
               fillColor: '#ffb040', fillOpacity: 1 }).addTo(map);
           if (p.name || p.sub) {
             L.marker(ll(p), { icon: L.divIcon({ className: '',
-                html: '<div class="hmp-label near">' + (p.name || '') + ' ' +
-                      (p.sub || '') + '</div>', iconSize: [0,0], iconAnchor: [-6,-10] }) }).addTo(map);
+                html: '<div class="hmp-label near">' + esc(p.name) + ' ' +
+                      esc(p.sub) + '</div>', iconSize: [0,0], iconAnchor: [-6,-10] }) }).addTo(map);
           }
         } else if (k === 'ghost') {
           L.circleMarker(ll(p), { radius: 3, color: '#96a2b8',
