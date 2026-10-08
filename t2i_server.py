@@ -19,6 +19,7 @@
 import asyncio
 import contextlib
 import os
+import tempfile
 
 from aiohttp import web
 
@@ -172,7 +173,7 @@ async def render_html(
             try:
                 dom = await page.content()
                 dump_path = os.path.join(
-                    os.path.dirname(__file__), f"debug_dom_{debug_tag}.html"
+                    tempfile.gettempdir(), f"hmp_t2i_debug_dom_{debug_tag}.html"
                 )
                 await asyncio.to_thread(_write_text, dump_path, dom)
                 print(f"[t2i_server] DOM 已保存: {dump_path}")
