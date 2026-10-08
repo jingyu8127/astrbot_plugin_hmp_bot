@@ -5,3 +5,5 @@ version: 1.2.1
 repo: https://github.com/jingyu8127/astrbot_plugin_hmp_bot
 display_name: HMP Bot
 short_desc: HaulMP 玩家资料查询、账号绑定、实时定位与路况
+support_platforms:
+  - qq_official
