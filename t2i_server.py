@@ -1,32 +1,5 @@
-# -*- coding: utf-8 -*-
-# HMP Bot t2i 渲染服务 —— HaulMP 平台查询插件（基于 AstrBot）
-# Copyright (C) 2026 鲸鱼
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
-
 """
 本地「等待式」t2i 服务（用于 astrbot_plugin_hmp_bot 的路况 / 定位路网渲染）
-
-与 AstrBot 默认远程端点（soulter.top）不同，本服务在截图前会 **等待页面网络空闲
-（networkidle）** 再额外停留一小段时间，因此 HaulMP 的矢量瓦片底图能够加载并绘制完成，
-路网（真实 ETS2 路网）才会正常显示。AstrBot 默认的远程端点截图过早，矢量瓦片往往还没
-加载完，导致只有热力图 / 标记而看不到路网。
-
-兼容 AStrBot html_renderer.render_custom_template 的契约：
-- 接收 POST {endpoint}/generate，body 为 JSON
-- 关键字段：html（已渲染好的完整 HTML 字符串）、type(jpeg/png)、quality、width、height、full_page
-- return_url=False 时，AStrBot 期望直接返回图片字节
 
 安装：
     pip install playwright

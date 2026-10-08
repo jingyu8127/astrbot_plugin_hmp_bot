@@ -1,30 +1,6 @@
-# HMP Bot —— HaulMP 平台查询插件（基于 AstrBot）
-# Copyright (C) 2026 鲸鱼
-#
-# This program is free software: you can redistribute it and/or modify
-# it under the terms of the GNU General Public License as published by
-# the Free Software Foundation, either version 3 of the License, or
-# (at your option) any later version.
-#
-# This program is distributed in the hope that it will be useful,
-# but WITHOUT ANY WARRANTY; without even the implied warranty of
-# MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the
-# GNU General Public License for more details.
-#
-# You should have received a copy of the GNU General Public License
-# along with this program.  If not, see <https://www.gnu.org/licenses/>.
 
 """
 HMP Bot —— HaulMP 平台查询插件（基于 AstrBot）。
-
-开发要点（来自 AstrBot 官方插件开发文档）：
-- 插件类必须继承自 astrbot.api.star.Star，且文件名必须为 main.py。
-- 处理函数（Handler）必须写在插件类内部，前两个参数固定为 self 和 event。
-- 回复消息用 `yield event.plain_result(...)`（生成器方式），多条内容用
-  `yield event.chain_result([组件, ...])`。
-- 日志请使用 astrbot.api.logger，不要用标准 logging 模块。
-- 持久化数据存放到 data 目录，避免插件更新/重装时被覆盖。
-- 网络请求使用 aiohttp 等异步库，禁止使用 requests。
 
 功能与命令：
 - 绑定 HaulMP 论坛用户名：  绑定 [用户名]        （每人最多 3 个，首个为主账号）

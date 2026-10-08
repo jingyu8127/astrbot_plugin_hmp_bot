@@ -93,5 +93,4 @@ HMP Bot 是一个面向 [HaulMP](https://haulmp.com)（卡车模拟联机）玩�
 本项目以 **GNU General Public License v3.0 or later**（`GPL-3.0-or-later`）发布，完整协议文本见 [LICENSE](LICENSE)。
 
 - 你可以自由使用、修改和再分发本项目，但基于本项目产生的衍生作品必须以相同许可证开源。
-- `leaflet_templates/vendor/` 下的第三方前端库（Leaflet、Leaflet.heat、Leaflet.VectorGrid 等）版权归各自作者所有，遵循其原始许可证，不适用本项目的 GPLv3。
 
