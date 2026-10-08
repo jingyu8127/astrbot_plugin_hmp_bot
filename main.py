@@ -3,6 +3,7 @@ import json
 import math
 import os
 import re
+import shutil
 import uuid
 
 import aiohttp
@@ -15,6 +16,12 @@ from astrbot.api.star import Context, Star
 _HERE = os.path.dirname(os.path.abspath(__file__))
 _TPL_DIR = os.path.join(_HERE, "leaflet_templates")
 _VENDOR_DIR = os.path.join(_TPL_DIR, "vendor")
+
+# 持久化目录：必须是 AstrBot 规范位置 data/plugin_data/<插件名>。
+# 不能写进插件自身代码目录（data/plugins/<插件名>），否则插件更新 / 重装会覆盖用户数据。
+DATA_DIR = os.path.join("data", "plugin_data", "astrbot_plugin_hmp_bot")
+# 旧版本误写在插件目录下的数据位置，仅用于启动时一次性迁移
+LEGACY_DATA_DIR = os.path.join("data", "plugins", "astrbot_plugin_hmp_bot")
 
 
 def _read_vendor(rel: str) -> str:
@@ -156,13 +163,30 @@ class HmpBotPlugin(Star):
         super().__init__(context)
         self.config = config  # 由 _conf_schema.json 解析而来，继承自 dict
 
-        # 持久化目录：data/plugins/<插件名>，不要写到插件自身目录
-        self.data_dir = os.path.join("data", "plugins", "astrbot_plugin_hmp_bot")
+        # 持久化目录：data/plugin_data/<插件名>（AstrBot 规范位置，插件更新不会丢数据）
+        self.data_dir = DATA_DIR
         os.makedirs(self.data_dir, exist_ok=True)
         self.bindings_path = os.path.join(self.data_dir, BINDINGS_FILE)
-        # 生成的定位/路况地图图片存放目录
+        # 生成的定位/路况地图图片存放目录（临时产物，随 data 目录统一管理）
         self.maps_dir = os.path.abspath(os.path.join(self.data_dir, "maps"))
         os.makedirs(self.maps_dir, exist_ok=True)
+        self._migrate_legacy_bindings()
+
+    def _migrate_legacy_bindings(self) -> None:
+        """把旧版本写在插件目录下的绑定数据迁移到规范目录（只迁移一次）。
+
+        仅在“旧文件存在且新文件不存在”时复制，失败只记日志，不影响插件正常使用。
+        """
+        if os.path.abspath(LEGACY_DATA_DIR) == os.path.abspath(self.data_dir):
+            return
+        src = os.path.join(LEGACY_DATA_DIR, BINDINGS_FILE)
+        if not os.path.isfile(src) or os.path.exists(self.bindings_path):
+            return
+        try:
+            shutil.copy2(src, self.bindings_path)
+            logger.info("已迁移旧版绑定数据：%s -> %s", src, self.bindings_path)
+        except Exception as e:  # 迁移失败不影响插件正常使用
+            logger.warning("迁移旧版绑定数据失败（忽略）: %s", e)
 
     # ---------- 绑定存储（平台用户 -> [HaulMP 账号列表]） ----------
     def _load_bindings(self) -> dict:
