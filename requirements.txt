@@ -5,4 +5,7 @@
 #   playwright install chromium      # 仅首次，约 150MB
 aiohttp>=3.8
 playwright>=1.41
+# 开发依赖（提交前格式化 / 检查）：
+#   python -m pip install ruff
+#   ruff format . && ruff check .
 # 文件用途：运行依赖清单 —— aiohttp（HTTP 客户端）、playwright（本地 t2i 截图）
