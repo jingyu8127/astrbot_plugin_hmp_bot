@@ -1,0 +1,8 @@
+# HaulMP 机器人插件依赖
+# 本地 t2i 服务（t2i_server.py）用 aiohttp + playwright 渲染地图图片。
+# 安装插件后请执行：
+#   pip install aiohttp playwright
+#   playwright install chromium      # 仅首次，约 150MB
+aiohttp>=3.8
+playwright>=1.41
+# 文件用途：运行依赖清单 —— aiohttp（HTTP 客户端）、playwright（本地 t2i 截图）
