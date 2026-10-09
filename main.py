@@ -1,4 +1,5 @@
 import asyncio
+import contextlib
 import json
 import math
 import os
@@ -156,6 +157,31 @@ def _write_bytes(path: str, data: bytes) -> None:
     """把图片字节写入磁盘；供 asyncio.to_thread 调用，避免阻塞事件循环。"""
     with open(path, "wb") as f:
         f.write(data)
+
+
+def _disable_t2i(result):
+    """关闭本条消息的「文转图」。
+
+    AstrBot 的 ResultDecorateStage 判定条件是
+    ``(use_t2i_ is None and 全局 t2i 开关) or use_t2i_``，
+    因此 ``use_t2i_ = False`` 是单条消息级别的强制关闭。
+
+    本插件只有「定位 / 路况」需要图片（由插件自己渲染地图），
+    其它功能一律发纯文本，避免长文本被 AstrBot 自动转成图片；
+    同时防止定位 / 路况消息里的地图组件被转图结果顶掉。
+    """
+    setter = getattr(result, "use_t2i", None)
+    if callable(setter):  # AstrBot 提供的链式方法
+        setter(False)
+    else:  # 兼容没有该方法的旧版本
+        with contextlib.suppress(AttributeError):
+            result.use_t2i_ = False
+    return result
+
+
+def _plain(event: AstrMessageEvent, text: str):
+    """构造纯文本回复（强制不转图）。"""
+    return _disable_t2i(event.plain_result(text))
 
 
 class HmpBotPlugin(Star):
@@ -994,61 +1020,61 @@ class HmpBotPlugin(Star):
         if m:
             res = await self._do_query(event, m.group(1))
             if isinstance(res, str):
-                yield event.plain_result(res)
+                yield _plain(event, res)
             else:
                 out = self._build_profile_output(res)
                 if isinstance(out, str):
-                    yield event.plain_result(out)
+                    yield _plain(event, out)
                 else:
-                    yield event.chain_result(out)
+                    yield _disable_t2i(event.chain_result(out))
             return
 
         m = RE_SEARCH.match(text)
         if m:
-            yield event.plain_result(await self._do_search(event, m.group(1)))
+            yield _plain(event, await self._do_search(event, m.group(1)))
             return
 
         m = RE_BIND.match(text)
         if m:
-            yield event.plain_result(await self._do_bind(event, m.group(1)))
+            yield _plain(event, await self._do_bind(event, m.group(1)))
             return
 
         m = RE_MY.match(text)
         if m:
-            yield event.plain_result(self._do_my_bindings(event))
+            yield _plain(event, self._do_my_bindings(event))
             return
 
         m = RE_UNBIND.match(text)
         if m:
-            yield event.plain_result(await self._do_unbind(event, m.group(1)))
+            yield _plain(event, await self._do_unbind(event, m.group(1)))
             return
 
         m = RE_SERVER.match(text)
         if m:
-            yield event.plain_result(await self._do_server(event))
+            yield _plain(event, await self._do_server(event))
             return
 
         m = RE_LOCATE.match(text)
         if m:
             res = await self._do_locate(event, m.group(1))
             if isinstance(res, str):
-                yield event.plain_result(res)
+                yield _plain(event, res)
             else:
-                yield event.chain_result(res)
+                yield _disable_t2i(event.chain_result(res))
             return
 
         m = RE_TRAFFIC.match(text)
         if m:
             res = await self._do_traffic()
             if isinstance(res, str):
-                yield event.plain_result(res)
+                yield _plain(event, res)
             else:
-                yield event.chain_result(res)
+                yield _disable_t2i(event.chain_result(res))
             return
 
         m = RE_MENU.match(text)
         if m:
-            yield event.plain_result(self._menu_text())
+            yield _plain(event, self._menu_text())
             return
 
     # ---------- 菜单 ----------
