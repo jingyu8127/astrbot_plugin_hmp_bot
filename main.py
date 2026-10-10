@@ -160,16 +160,7 @@ def _write_bytes(path: str, data: bytes) -> None:
 
 
 def _disable_t2i(result):
-    """关闭本条消息的「文转图」。
-
-    AstrBot 的 ResultDecorateStage 判定条件是
-    ``(use_t2i_ is None and 全局 t2i 开关) or use_t2i_``，
-    因此 ``use_t2i_ = False`` 是单条消息级别的强制关闭。
-
-    本插件只有「定位 / 路况」需要图片（由插件自己渲染地图），
-    其它功能一律发纯文本，避免长文本被 AstrBot 自动转成图片；
-    同时防止定位 / 路况消息里的地图组件被转图结果顶掉。
-    """
+    """关闭本条消息的「文转图」：只允许定位 / 路况出图，其它一律纯文本。"""
     setter = getattr(result, "use_t2i", None)
     if callable(setter):  # AstrBot 提供的链式方法
         setter(False)
@@ -510,6 +501,20 @@ class HmpBotPlugin(Star):
             f"版本说明：{notes}",
             f"发布时间：{published}",
         ]
+
+        # status 接口的 drivers 是在线司机名单（含车型），但服务端每次只随机返回一部分
+        # （实测固定 128 条，?limit / ?offset / ?page 等参数均无效），因此明确标注为抽样。
+        drivers = data.get("drivers") or []
+        if drivers:
+            total = players if players is not None else "?"
+            lines.append("")
+            lines.append(f"— 在线司机（抽样 {len(drivers)} 人，共 {total} 人在线）—")
+            lines.append("（该接口每次随机返回一部分玩家，非完整名单）")
+            for i, driver in enumerate(drivers, 1):
+                name = (driver.get("name") or "").strip() or "未知玩家"
+                model = (driver.get("model") or "").strip()
+                lines.append(f"{i}. {name}" + (f" — {model}" if model else ""))
+
         return "\n".join(lines)
 
     # ---------- 输出：纯文本 / 图文卡片 ----------
