@@ -501,20 +501,6 @@ class HmpBotPlugin(Star):
             f"版本说明：{notes}",
             f"发布时间：{published}",
         ]
-
-        # status 接口的 drivers 是在线司机名单（含车型），但服务端每次只随机返回一部分
-        # （实测固定 128 条，?limit / ?offset / ?page 等参数均无效），因此明确标注为抽样。
-        drivers = data.get("drivers") or []
-        if drivers:
-            total = players if players is not None else "?"
-            lines.append("")
-            lines.append(f"— 在线司机（抽样 {len(drivers)} 人，共 {total} 人在线）—")
-            lines.append("（该接口每次随机返回一部分玩家，非完整名单）")
-            for i, driver in enumerate(drivers, 1):
-                name = (driver.get("name") or "").strip() or "未知玩家"
-                model = (driver.get("model") or "").strip()
-                lines.append(f"{i}. {name}" + (f" — {model}" if model else ""))
-
         return "\n".join(lines)
 
     # ---------- 输出：纯文本 / 图文卡片 ----------
